@@ -1,10 +1,10 @@
 {
-  "projectId": "gen-lang-client-0467577444",
-  "appId": "1:516077683233:web:d6b807ca2da1f941d09960",
-  "apiKey": "AIzaSyB3b7jzeEdo7gHLNuquCCpRRku-E4JA2_g",
-  "authDomain": "gen-lang-client-0467577444.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-5be1ba0b-6558-48f0-82c1-3d0543ed92b2",
-  "storageBucket": "gen-lang-client-0467577444.firebasestorage.app",
-  "messagingSenderId": "516077683233",
+  "projectId": "aegis-helmet-app",
+  "appId": "1:144919838925:web:745f234437e6256142e984",
+  "apiKey": "AIzaSyB_ZObDa1Q5FjB5Q4awRwqjEUPN95S0n30",
+  "authDomain": "aegis-helmet-app.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "aegis-helmet-app.firebasestorage.app",
+  "messagingSenderId": "144919838925",
   "measurementId": ""
 }
