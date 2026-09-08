@@ -325,7 +325,7 @@ export default function SettingsView() {
                 onClick={() => setActiveCategory(cat.id as any)}
                 className={`w-full p-4 rounded-2xl flex items-center justify-between group transition-all ${
                   activeCategory === cat.id
-                    ? 'bg-cyber-blue text-black shadow-[0_0_20px_#00D1FF]'
+                    ? 'bg-cyber-blue text-black shadow-[0_0_20px_#FF6B35]'
                     : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white'
                 }`}
               >
@@ -525,7 +525,7 @@ export default function SettingsView() {
                       <button
                         onClick={saveProfile}
                         disabled={isSaving}
-                        className="px-10 py-4 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-[0.25em] rounded-2xl shadow-[0_0_30px_#00D1FF] hover:scale-105 active:scale-95 transition-all flex items-center gap-3 disabled:opacity-50"
+                        className="px-10 py-4 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-[0.25em] rounded-2xl shadow-[0_0_30px_#FF6B35] hover:scale-105 active:scale-95 transition-all flex items-center gap-3 disabled:opacity-50"
                       >
                         {isSaving ? <RefreshCcw className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
                         Commit Identification Changes

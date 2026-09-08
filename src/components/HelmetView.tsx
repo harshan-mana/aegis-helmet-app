@@ -542,7 +542,7 @@ export default function HelmetView() {
                         setCameraError(null);
                         setIsCapturing(true);
                       }}
-                      className="px-6 py-2.5 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-wider rounded-xl shadow-[0_0_20px_#00D1FF]"
+                      className="px-6 py-2.5 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-wider rounded-xl shadow-[0_0_20px_#FF6B35]"
                     >
                       Connect Camera Feed
                     </button>
@@ -574,7 +574,7 @@ export default function HelmetView() {
                 <button
                   onClick={captureAndAnalyze}
                   disabled={isAnalyzing}
-                  className="px-6 py-3.5 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-wider rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-[0_0_30px_#00D1FF] flex items-center gap-2 disabled:opacity-50"
+                  className="px-6 py-3.5 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-wider rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-[0_0_30px_#FF6B35] flex items-center gap-2 disabled:opacity-50"
                 >
                   {isAnalyzing ? (
                     <>

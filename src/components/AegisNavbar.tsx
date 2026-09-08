@@ -46,7 +46,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
         </div>
 
         <div className="flex items-center gap-3.5 relative z-10">
-          <div className="p-2.5 bg-cyber-blue rounded-2xl shadow-[0_0_20px_#00D1FF] group-hover:scale-105 transition-transform flex items-center justify-center">
+          <div className="p-2.5 bg-cyber-blue rounded-2xl shadow-[0_0_20px_#FF6B35] group-hover:scale-105 transition-transform flex items-center justify-center">
             <Shield className="w-5 h-5 text-black" />
           </div>
           <div>
@@ -67,7 +67,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
               onClick={() => onViewChange(item.id as any)}
               className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all relative overflow-hidden ${
                 currentView === item.id
-                  ? 'text-black bg-cyber-blue shadow-[0_0_20px_#00D1FF]'
+                  ? 'text-black bg-cyber-blue shadow-[0_0_20px_#FF6B35]'
                   : 'text-white/50 hover:text-white hover:bg-white/5'
               }`}
             >

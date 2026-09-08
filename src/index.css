@@ -7,21 +7,21 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   --font-display: "Space Grotesk", sans-serif;
   
-  --color-cyber-blue: #00D1FF;
-  --color-cyber-orange: #FF6B00;
-  --color-cyber-purple: #8B5CF6;
-  --color-cyber-green: #00FFB3;
-  --color-cyber-red: #FF3B3B;
-  --color-deep-space: #050816;
+  --color-cyber-blue: #FF6B35;
+  --color-cyber-orange: #FFB347;
+  --color-cyber-purple: #FF8C69;
+  --color-cyber-green: #FFD18C;
+  --color-cyber-red: #FF4D4D;
+  --color-deep-space: #14100D;
   
-  --color-brand-primary: #00D1FF;
-  --color-brand-dark: #050816;
-  --color-brand-accent: #00FFB3;
+  --color-brand-primary: #FF6B35;
+  --color-brand-dark: #14100D;
+  --color-brand-accent: #FFB347;
 }
 
 @layer base {
   body {
-    @apply bg-[#050816] text-white font-sans antialiased overflow-x-hidden;
+    @apply bg-[#14100D] text-white font-sans antialiased overflow-x-hidden;
   }
 }
 
@@ -31,16 +31,16 @@
   }
   
   .neon-border {
-    @apply border border-cyber-blue/30 shadow-[0_0_15px_rgba(0,209,255,0.2)];
+    @apply border border-cyber-blue/30 shadow-[0_0_15px_rgba(255,107,53,0.2)];
   }
 
   .neon-text-blue {
-    @apply text-cyber-blue drop-shadow-[0_0_8px_rgba(0,209,255,0.8)];
+    @apply text-cyber-blue drop-shadow-[0_0_8px_rgba(255,107,53,0.8)];
   }
 
   .cyber-grid {
-    background-image: linear-gradient(rgba(0, 209, 255, 0.05) 1px, transparent 1px),
-                      linear-gradient(90deg, rgba(0, 209, 255, 0.05) 1px, transparent 1px);
+    background-image: linear-gradient(rgba(255, 107, 53, 0.05) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255, 107, 53, 0.05) 1px, transparent 1px);
     background-size: 40px 40px;
   }
 

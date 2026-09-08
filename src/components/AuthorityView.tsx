@@ -401,7 +401,7 @@ export default function AuthorityView() {
     reader.readAsText(file);
   };
 
-  const COLORS = ['#00D1FF', '#FF5500', '#FF3B3B', '#FFCC00', '#00FF9D', '#B55FE6'];
+  const COLORS = ['#FF6B35', '#FFB347', '#FF4D4D', '#FFCC00', '#FFD18C', '#FF8C69'];
 
   return (
     <div className="pt-28 pb-16 px-4 sm:px-8 max-w-[1700px] mx-auto space-y-8">
@@ -551,7 +551,7 @@ export default function AuthorityView() {
                 onClick={() => setActiveTab(tab.id as any)}
                 className={`px-5 py-2.5 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all ${
                   activeTab === tab.id
-                    ? 'bg-cyber-blue text-black shadow-[0_0_20px_#00D1FF]'
+                    ? 'bg-cyber-blue text-black shadow-[0_0_20px_#FF6B35]'
                     : 'text-white/40 hover:text-white hover:bg-white/5'
                 }`}
               >
@@ -584,7 +584,7 @@ export default function AuthorityView() {
 
               <button
                 onClick={() => setIsAddVehicleOpen(true)}
-                className="px-4 py-2 bg-cyber-blue text-black rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all hover:scale-105 shadow-[0_0_15px_#00D1FF]"
+                className="px-4 py-2 bg-cyber-blue text-black rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all hover:scale-105 shadow-[0_0_15px_#FF6B35]"
               >
                 <Plus className="w-3.5 h-3.5" /> Register Vehicle
               </button>
@@ -692,7 +692,7 @@ export default function AuthorityView() {
                               No Visual Snapshot
                             </div>
                           )}
-                          <div className="absolute inset-0 bg-gradient-to-t from-[#050816] via-transparent to-transparent opacity-80" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-[#14100D] via-transparent to-transparent opacity-80" />
 
                           <div className="absolute top-3 left-3 flex flex-col gap-1.5">
                             <span
@@ -1043,8 +1043,8 @@ export default function AuthorityView() {
                       <AreaChart data={analyticsData.trendData}>
                         <defs>
                           <linearGradient id="colorViolations" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#00D1FF" stopOpacity={0.4} />
-                            <stop offset="95%" stopColor="#00D1FF" stopOpacity={0} />
+                            <stop offset="5%" stopColor="#FF6B35" stopOpacity={0.4} />
+                            <stop offset="95%" stopColor="#FF6B35" stopOpacity={0} />
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="#222" />
@@ -1062,7 +1062,7 @@ export default function AuthorityView() {
                           type="monotone"
                           dataKey="violations"
                           name="Traffic Violations"
-                          stroke="#00D1FF"
+                          stroke="#FF6B35"
                           fillOpacity={1}
                           fill="url(#colorViolations)"
                         />
@@ -1090,8 +1090,8 @@ export default function AuthorityView() {
                             fontSize: '11px',
                           }}
                         />
-                        <Bar dataKey="infractions" name="Logged Infractions" fill="#FF5500" radius={[6, 6, 0, 0]} />
-                        <Bar dataKey="risk" name="Sector Risk Index" fill="#00D1FF" radius={[6, 6, 0, 0]} />
+                        <Bar dataKey="infractions" name="Logged Infractions" fill="#FFB347" radius={[6, 6, 0, 0]} />
+                        <Bar dataKey="risk" name="Sector Risk Index" fill="#FF6B35" radius={[6, 6, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -1320,7 +1320,7 @@ export default function AuthorityView() {
                   </button>
                   <button
                     type="submit"
-                    className="px-8 py-2.5 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-wider rounded-xl shadow-[0_0_20px_#00D1FF]"
+                    className="px-8 py-2.5 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-wider rounded-xl shadow-[0_0_20px_#FF6B35]"
                   >
                     Save to Central RTO
                   </button>
@@ -1607,7 +1607,7 @@ export default function AuthorityView() {
                     onClick={() =>
                       updateViolationStatus(selectedViolation.id, 'Endorsed', selectedViolation.penaltyAmount || 1000)
                     }
-                    className="px-6 py-2.5 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-wider rounded-xl shadow-[0_0_20px_#00D1FF] hover:scale-105 transition-all"
+                    className="px-6 py-2.5 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-wider rounded-xl shadow-[0_0_20px_#FF6B35] hover:scale-105 transition-all"
                   >
                     Issue Official e-Challan
                   </button>

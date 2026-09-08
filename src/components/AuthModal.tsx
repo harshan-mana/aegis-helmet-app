@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Chrome, Apple, Mail, X, ArrowLeft, Zap, CheckCircle2, Loader2, Lock, Shield, User, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { AegisAuthUser, LOCAL_AUTH_STORAGE_KEY, LOCAL_PROFILE_STORAGE_KEY } from '../types/auth';
+import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, User as FirebaseUser } from 'firebase/auth';
+import { auth, googleProvider, appleProvider } from '../lib/firebase';
+import { AegisAuthUser, LOCAL_AUTH_STORAGE_KEY } from '../types/auth';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -51,114 +53,89 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
     onClose();
   };
 
-  // 1. Google OAuth Simulation with realistic handshake
-  const handleGoogleSignIn = () => {
+  const deriveRole = (email: string): 'Driver' | 'RTO' =>
+    email.toLowerCase().includes('rto') || email.toLowerCase().includes('admin') ? 'RTO' : 'Driver';
+
+  const mapCredentialUser = (u: FirebaseUser, provider: 'google' | 'apple' | 'email'): AegisAuthUser => {
+    const email = u.email || '';
+    const name =
+      u.displayName ||
+      email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) ||
+      'Aegis Rider';
+    return {
+      uid: u.uid,
+      displayName: name,
+      email,
+      photoURL: u.photoURL || undefined,
+      provider,
+      role: deriveRole(email),
+    };
+  };
+
+  // 1. Real Google OAuth via Firebase popup
+  const handleGoogleSignIn = async () => {
     setError('');
     setActiveProvider('google');
     setAuthStep('connecting');
     setIsAuthenticating(true);
-
-    const mockAccount = {
-      name: 'Sasidhar R',
-      email: 'sasidhar.23ise@cambridge.edu.in',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=160&auto=format&fit=crop&q=80',
-      role: 'Driver' as const,
-    };
-    setSimulatedAccount(mockAccount);
-
-    setTimeout(() => {
-      setAuthStep('verifying');
-      setTimeout(() => {
-        setAuthStep('success');
-        setTimeout(() => {
-          const authUser: AegisAuthUser = {
-            uid: `google_user_${Date.now()}`,
-            displayName: mockAccount.name,
-            email: mockAccount.email,
-            photoURL: mockAccount.avatar,
-            provider: 'google',
-            role: mockAccount.role,
-          };
-
-          // Persist user and profile in localStorage
-          localStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(authUser));
-          localStorage.setItem(
-            LOCAL_PROFILE_STORAGE_KEY,
-            JSON.stringify({
-              name: mockAccount.name,
-              email: mockAccount.email,
-              phone: '9876543210',
-              role: mockAccount.role,
-              emergencyContact1: { name: 'Emergency Control Room', phone: '1120001122' },
-              emergencyContact2: { name: 'Safety Guardian', phone: '9988776655' },
-              autoReport: true,
-              guardianNotifications: true,
-              photoURL: mockAccount.avatar,
-            })
-          );
-
-          onLogin(authUser);
-          handleModalClose();
-        }, 600);
-      }, 700);
-    }, 600);
+    try {
+      const cred = await signInWithPopup(auth, googleProvider);
+      setAuthStep('success');
+      setSimulatedAccount({
+        name: cred.user.displayName || cred.user.email?.split('@')[0] || '',
+        email: cred.user.email || '',
+        avatar: cred.user.photoURL || '',
+        role: deriveRole(cred.user.email || ''),
+      });
+      onLogin(mapCredentialUser(cred.user, 'google'));
+      setTimeout(handleModalClose, 400);
+    } catch (e: any) {
+      setIsAuthenticating(false);
+      if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
+        setError('Sign-in window was closed. Please try again.');
+      } else if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
+        setError('Pop-up was blocked. Allow pop-ups for this site and try again.');
+      } else if (e.code && (e.code.includes('configuration-not-found') || e.code.includes('admin-restricted-operation'))) {
+        setError('Google sign-in is not enabled yet. Enable it in Firebase Console → Authentication → Sign-in method.');
+      } else {
+        setError(e?.message || 'Google sign-in failed. Please try again.');
+      }
+    }
   };
 
-  // 2. Apple OAuth Simulation with realistic handshake
-  const handleAppleSignIn = () => {
+  // 2. Real Apple OAuth via Firebase popup
+  const handleAppleSignIn = async () => {
     setError('');
     setActiveProvider('apple');
     setAuthStep('connecting');
     setIsAuthenticating(true);
-
-    const mockAccount = {
-      name: 'Jordan Reed',
-      email: 'jordan.reed@privaterelay.appleid.com',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=160&auto=format&fit=crop&q=80',
-      role: 'Driver' as const,
-    };
-    setSimulatedAccount(mockAccount);
-
-    setTimeout(() => {
-      setAuthStep('verifying');
-      setTimeout(() => {
-        setAuthStep('success');
-        setTimeout(() => {
-          const authUser: AegisAuthUser = {
-            uid: `apple_user_${Date.now()}`,
-            displayName: mockAccount.name,
-            email: mockAccount.email,
-            photoURL: mockAccount.avatar,
-            provider: 'apple',
-            role: mockAccount.role,
-          };
-
-          // Persist user and profile in localStorage
-          localStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(authUser));
-          localStorage.setItem(
-            LOCAL_PROFILE_STORAGE_KEY,
-            JSON.stringify({
-              name: mockAccount.name,
-              email: mockAccount.email,
-              phone: '9845012345',
-              role: mockAccount.role,
-              emergencyContact1: { name: 'Dispatch Station 112', phone: '1120001122' },
-              emergencyContact2: { name: 'Medical Response', phone: '1080001088' },
-              autoReport: true,
-              guardianNotifications: true,
-              photoURL: mockAccount.avatar,
-            })
-          );
-
-          onLogin(authUser);
-          handleModalClose();
-        }, 600);
-      }, 700);
-    }, 600);
+    try {
+      const cred = await signInWithPopup(auth, appleProvider);
+      setAuthStep('success');
+      setSimulatedAccount({
+        name: cred.user.displayName || cred.user.email?.split('@')[0] || '',
+        email: cred.user.email || '',
+        avatar: cred.user.photoURL || '',
+        role: deriveRole(cred.user.email || ''),
+      });
+      onLogin(mapCredentialUser(cred.user, 'apple'));
+      setTimeout(handleModalClose, 400);
+    } catch (e: any) {
+      setIsAuthenticating(false);
+      if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
+        setError('Sign-in window was closed. Please try again.');
+      } else if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
+        setError('Pop-up was blocked. Allow pop-ups for this site and try again.');
+      } else if (e.code && (e.code.includes('configuration-not-found') || e.code.includes('admin-restricted-operation'))) {
+        setError('Apple sign-in is not enabled. Enable it in Firebase Console → Authentication → Sign-in method (Apple provider requires paid Apple Developer account).');
+      } else {
+        setError(e?.message || 'Apple sign-in failed. Please try again.');
+      }
+    }
   };
 
-  // 3. Email & Password Local Authentication
-  const handleEmailAuth = (e: React.FormEvent) => {
+  // 3. Real Email & Password Authentication via Firebase
+  const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -170,46 +147,49 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
       return;
     }
 
-    if (cleanPassword.length < 4) {
-      setError('Password must be at least 4 characters long.');
+    if (cleanPassword.length < 6) {
+      setError('Password must be at least 6 characters long.');
       return;
     }
 
-    const emailNamePart = cleanEmail.split('@')[0];
-    const derivedName = fullName.trim() || emailNamePart.replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-    const role: 'Driver' | 'RTO' = cleanEmail.toLowerCase().includes('rto') || cleanEmail.toLowerCase().includes('admin') ? 'RTO' : 'Driver';
-
-    const authUser: AegisAuthUser = {
-      uid: `email_user_${Date.now()}`,
-      displayName: derivedName,
-      email: cleanEmail,
-      provider: 'email',
-      role,
-    };
-
-    // Save session to localStorage
-    localStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(authUser));
-    
-    // Check if profile exists already or generate a clean one
-    const existingProfile = localStorage.getItem(LOCAL_PROFILE_STORAGE_KEY);
-    if (!existingProfile) {
-      localStorage.setItem(
-        LOCAL_PROFILE_STORAGE_KEY,
-        JSON.stringify({
-          name: derivedName,
-          email: cleanEmail,
-          phone: '9876543210',
-          role,
-          emergencyContact1: { name: 'Emergency Control', phone: '1120001122' },
-          emergencyContact2: { name: 'Guardian Dispatch', phone: '1080001088' },
-          autoReport: true,
-          guardianNotifications: true,
-        })
-      );
+    setActiveProvider('email');
+    setAuthStep('connecting');
+    setIsAuthenticating(true);
+    try {
+      let userCred;
+      if (isLogin) {
+        userCred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+      } else {
+        userCred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+        if (fullName.trim()) {
+          await updateProfile(userCred.user, { displayName: fullName.trim() });
+        }
+      }
+      setAuthStep('success');
+      setSimulatedAccount({
+        name: userCred.user.displayName || cleanEmail.split('@')[0],
+        email: userCred.user.email || cleanEmail,
+        avatar: userCred.user.photoURL || '',
+        role: deriveRole(cleanEmail),
+      });
+      onLogin(mapCredentialUser(userCred.user, 'email'));
+      setTimeout(handleModalClose, 400);
+    } catch (e: any) {
+      setIsAuthenticating(false);
+      if (e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found') {
+        setError('Incorrect email or password.');
+      } else if (e.code === 'auth/email-already-in-use') {
+        setError('An account already exists with this email. Try signing in.');
+      } else if (e.code === 'auth/weak-password') {
+        setError('Password is too weak.');
+      } else if (e.code === 'auth/user-disabled') {
+        setError('This account has been disabled.');
+      } else if (e.code && (e.code.includes('admin-restricted-operation') || e.code.includes('operation-not-allowed'))) {
+        setError('Email/password sign-in is not enabled yet. Enable it in Firebase Console → Authentication → Sign-in method.');
+      } else {
+        setError(e?.message || 'Sign-in failed. Please try again.');
+      }
     }
-
-    onLogin(authUser);
-    handleModalClose();
   };
 
   // 4. Continue as Guest / Skip
@@ -398,7 +378,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
                           <button 
                             id="btn-continue-as-guest"
                             onClick={handleGuestAccess}
-                            className="w-full py-4 px-5 bg-gradient-to-r from-cyber-blue to-[#00A3FF] text-black font-black rounded-2xl flex items-center justify-between hover:scale-[1.02] active:scale-95 transition-all text-sm shadow-lg shadow-cyber-blue/25 group cursor-pointer"
+                            className="w-full py-4 px-5 bg-gradient-to-r from-cyber-blue to-[#FF8C69] text-black font-black rounded-2xl flex items-center justify-between hover:scale-[1.02] active:scale-95 transition-all text-sm shadow-lg shadow-cyber-blue/25 group cursor-pointer"
                           >
                             <div className="flex items-center gap-3">
                               <div className="p-1.5 bg-black/10 rounded-lg">

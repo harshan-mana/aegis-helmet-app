@@ -215,7 +215,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center bg-[#050816] relative overflow-hidden">
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-[#14100D] relative overflow-hidden">
         <div className="absolute inset-0 cyber-grid opacity-20" />
         
         <motion.div
@@ -258,7 +258,7 @@ export default function App() {
                   initial={{ x: '-100%' }}
                   animate={{ x: '100%' }}
                   transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute inset-0 w-full bg-cyber-blue shadow-[0_0_10px_#00D1FF]"
+                  className="absolute inset-0 w-full bg-cyber-blue shadow-[0_0_10px_#FF6B35]"
                 />
               </div>
             </div>
@@ -276,7 +276,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#080808]">
+    <div className="min-h-screen bg-[#14100D]">
       <AegisNavbar 
         userRole={userRole} 
         onViewChange={setCurrentView} 
