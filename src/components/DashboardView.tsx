@@ -2,14 +2,12 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import {
   Gauge,
   Activity,
-  Radio,
   Phone,
   Camera,
   CameraOff,
   ShieldAlert,
   Plus,
   Trash2,
-  MessageSquare,
   Ambulance,
   Siren,
   User,
@@ -17,7 +15,6 @@ import {
   Satellite,
   Wifi,
   WifiOff,
-  AlertTriangle,
   CheckCircle,
   X,
 } from 'lucide-react';
