@@ -21,7 +21,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, addDoc, serverTimestamp, getDoc, doc, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, getDoc, doc, onSnapshot, query, orderBy, limit, updateDoc } from 'firebase/firestore';
 
 interface Violation {
   id: string;
@@ -119,7 +119,6 @@ export default function ViolationsView() {
         const userRef = doc(db, 'users', auth.currentUser.uid);
         const userSnap = await getDoc(userRef);
         if (userSnap.exists()) {
-          const { updateDoc } = await import('firebase/firestore');
           await updateDoc(userRef, {
             name: profileDraft.name,
             phone: profileDraft.phone,
