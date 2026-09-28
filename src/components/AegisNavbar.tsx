@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, LayoutDashboard, Settings, User, LogOut, Menu, X, ShieldAlert, Cpu, Activity, Database } from 'lucide-react';
+import { Shield, LayoutDashboard, Settings, User, LogOut, Menu, X, ShieldAlert, Cpu, Activity, Database, Gauge, AlertTriangle } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 
 interface AegisNavbarProps {
   userRole: string | null;
-  onViewChange: (view: 'helmet' | 'authority' | 'profile' | 'settings') => void;
+  onViewChange: (view: 'dashboard' | 'violations' | 'helmet' | 'authority' | 'profile' | 'settings') => void;
   currentView: string;
   onSignOut?: () => void;
 }
@@ -28,6 +28,8 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
   }, []);
 
   const navItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: Gauge },
+    { id: 'violations', label: 'Violations', icon: AlertTriangle },
     { id: 'helmet', label: 'AI Sentry HUD', icon: Shield },
     { id: 'authority', label: 'RTO Command Center', icon: LayoutDashboard },
     { id: 'settings', label: 'System Config', icon: Settings },
