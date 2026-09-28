@@ -8,6 +8,8 @@ import AegisNavbar from './components/AegisNavbar';
 import HelmetView from './components/HelmetView';
 import AuthorityView from './components/AuthorityView';
 import SettingsView from './components/SettingsView';
+import DashboardView from './components/DashboardView';
+import ViolationsView from './components/ViolationsView';
 import AuthModal from './components/AuthModal';
 import { AegisAuthUser, LOCAL_AUTH_STORAGE_KEY } from './types/auth';
 
@@ -33,7 +35,7 @@ export default function App() {
       return null;
     }
   });
-  const [currentView, setCurrentView] = useState<'helmet' | 'authority' | 'profile' | 'settings'>('helmet');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'violations' | 'helmet' | 'authority' | 'profile' | 'settings'>('dashboard');
   const [loading, setLoading] = useState(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [needsProfile, setNeedsProfile] = useState(false);
@@ -107,7 +109,7 @@ export default function App() {
     setUserRole(authUser.role || 'Driver');
     setNeedsProfile(false);
     setShowOnboarding(false);
-    setCurrentView('helmet');
+    setCurrentView('dashboard');
     setIsAuthModalOpen(false);
   };
 
@@ -335,18 +337,20 @@ export default function App() {
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2 }}
             >
+              {currentView === 'dashboard' && <DashboardView />}
+              {currentView === 'violations' && <ViolationsView />}
               {currentView === 'helmet' && !needsProfile && <HelmetView />}
               {currentView === 'helmet' && needsProfile && (
                 <div className="flex flex-col items-center justify-center p-12 text-center space-y-4 pt-32">
-                   <ShieldAlert className="w-12 h-12 text-brand-primary animate-pulse" />
-                   <h2 className="text-2xl font-bold uppercase tracking-tighter">Profile Setup Required</h2>
-                   <p className="text-white/40 max-w-xs mx-auto">Please complete your personal and guardian contact details in settings to activate Aegis features.</p>
-                   <button 
+                  <ShieldAlert className="w-12 h-12 text-brand-primary animate-pulse" />
+                  <h2 className="text-2xl font-bold uppercase tracking-tighter">Profile Setup Required</h2>
+                  <p className="text-white/40 max-w-xs mx-auto">Please complete your personal and guardian contact details in settings to activate Aegis features.</p>
+                  <button 
                     onClick={() => setCurrentView('settings')}
                     className="px-8 py-3 bg-brand-primary text-white rounded-full font-bold text-xs"
-                   >
-                     GO TO SETTINGS
-                   </button>
+                  >
+                    GO TO SETTINGS
+                  </button>
                 </div>
               )}
               {currentView === 'authority' && <AuthorityView />}
@@ -380,13 +384,13 @@ export default function App() {
               <div className="absolute top-0 left-0 w-full h-1 bg-brand-primary" />
               
               <div className="flex items-center gap-4 mb-6">
-                 <div className="p-3 bg-brand-primary/10 rounded-2xl">
-                    <User className="w-6 h-6 text-brand-primary" />
-                 </div>
-                 <div>
-                    <h2 className="text-xl font-black uppercase tracking-tighter">Profile Activation</h2>
-                    <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest">Verify identity & Safety links</p>
-                 </div>
+                <div className="p-3 bg-brand-primary/10 rounded-2xl">
+                  <User className="w-6 h-6 text-brand-primary" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-black uppercase tracking-tighter">Profile Activation</h2>
+                  <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest">Verify identity & Safety links</p>
+                </div>
               </div>
 
               <div className="space-y-4">
