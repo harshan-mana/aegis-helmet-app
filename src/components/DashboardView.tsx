@@ -8,11 +8,11 @@ import {
   ShieldAlert,
   Plus,
   Trash2,
-  Ambulance,
-  Siren,
+  Heart,
+  AlertOctagon,
   User,
   Crosshair,
-  Satellite,
+  Radio,
   Wifi,
   WifiOff,
   CheckCircle,
@@ -239,8 +239,8 @@ export default function DashboardView() {
 
   const getContactIcon = (type: string) => {
     switch (type) {
-      case 'police': return Siren;
-      case 'ambulance': return Ambulance;
+      case 'police': return AlertOctagon;
+      case 'ambulance': return Heart;
       case 'fire': return ShieldAlert;
       default: return Phone;
     }
@@ -336,7 +336,7 @@ export default function DashboardView() {
         {/* 3. GPS Satellite Link */}
         <div className="glass-panel p-5 border-cyber-purple/20 relative overflow-hidden">
           <div className="flex items-center gap-2 mb-3">
-            <Satellite className="w-5 h-5 text-cyber-purple" />
+            <Radio className="w-5 h-5 text-cyber-purple" />
             <span className="text-[10px] font-black uppercase tracking-widest text-white/40">GPS Satellite</span>
           </div>
           <div className="flex items-center gap-2 mb-2">
@@ -579,13 +579,13 @@ export default function DashboardView() {
                 href="tel:100"
                 className="w-full py-3 bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-blue-500/30 transition-all"
               >
-                <Siren className="w-4 h-4" /> Police: 100
+                <AlertOctagon className="w-4 h-4" /> Police: 100
               </a>
               <a
                 href="tel:102"
                 className="w-full py-3 bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-red-500/30 transition-all"
               >
-                <Ambulance className="w-4 h-4" /> Ambulance: 102
+                <Heart className="w-4 h-4" /> Ambulance: 102
               </a>
               <a
                 href="tel:112"
