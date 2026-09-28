@@ -534,7 +534,7 @@ export default function DashboardView() {
                 <div className="flex items-center gap-2 text-cyber-purple">
                   <motion.div
                     animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: 'linear" }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
                   >
                     <Crosshair className="w-4 h-4" />
                   </motion.div>
