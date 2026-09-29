@@ -1,6 +1,5 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  Camera,
   AlertTriangle,
   Eye,
   ShieldCheck,
@@ -86,23 +85,18 @@ const PRESET_SCENARIOS = [
 ];
 
 export default function HelmetView() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isCapturing, setIsCapturing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisDuration, setAnalysisDuration] = useState<number | null>(null);
   const [recentViolations, setRecentViolations] = useState<any[]>([]);
   const [isSOSModalOpen, setIsSOSModalOpen] = useState(false);
-  const [streamSource, setStreamSource] = useState<'local' | 'esp32' | 'preset'>('local');
-  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [activePreset, setActivePreset] = useState<any | null>(null);
+  const [rtoLookupStatus, setRtoLookupStatus] = useState<RTOVehicle | null | 'NOT_FOUND' | 'CHECKING'>(null);
+  const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(null);
 
   // Live HUD metrics
   const [speedKmH, setSpeedKmH] = useState(48);
   const [gForce, setGForce] = useState(1.02);
-  const [activePreset, setActivePreset] = useState<any | null>(null);
-  const [rtoLookupStatus, setRtoLookupStatus] = useState<RTOVehicle | null | 'NOT_FOUND' | 'CHECKING'>(null);
-  const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(null);
 
   // Speed simulator interval
   useEffect(() => {
@@ -120,47 +114,6 @@ export default function HelmetView() {
     return () => clearInterval(interval);
   }, []);
 
-  // Camera start/stop
-  useEffect(() => {
-    if (isCapturing && streamSource === 'local') {
-      setCameraError(null);
-      startCamera();
-    } else {
-      stopCamera();
-    }
-  }, [isCapturing, streamSource]);
-
-  const startCamera = async () => {
-    setIsCapturing(true);
-    setCameraError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-      });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-    } catch (err: any) {
-      console.warn('Camera access failed:', err);
-      if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        setCameraError('No physical camera device detected on this workstation. You can use the Preset Scenarios below.');
-      } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setCameraError('Browser camera permission denied. Enable permissions or select a Preset Scenario.');
-      } else {
-        setCameraError(err.message || 'Camera capture failed. Please use Preset Scenarios.');
-      }
-      setIsCapturing(false);
-    }
-  };
-
-  const stopCamera = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach((track) => track.stop());
-      videoRef.current.srcObject = null;
-    }
-  };
-
   // Cross-reference RTO
   const verifyPlateInRTO = async (plateNumber: string) => {
     setRtoLookupStatus('CHECKING');
@@ -177,7 +130,6 @@ export default function HelmetView() {
         setRtoLookupStatus(veh);
         return veh;
       } else {
-        // Loose search across database
         const allSnap = await getDocs(collection(db, 'vehicles'));
         const found = allSnap.docs
           .map((d) => d.data() as RTOVehicle)
@@ -201,61 +153,12 @@ export default function HelmetView() {
     }
   };
 
-  // Run AI Analysis on Live Video Frame
-  const captureAndAnalyze = async () => {
-    if (!videoRef.current || !canvasRef.current) {
-      if (activePreset) {
-        runPresetAnalysis(activePreset);
-        return;
-      }
-      return;
-    }
-
-    setIsAnalyzing(true);
-    const startTime = Date.now();
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    canvas.width = videoRef.current.videoWidth || 640;
-    canvas.height = videoRef.current.videoHeight || 360;
-    ctx.drawImage(videoRef.current, 0, 0);
-
-    const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-    const result = await analyzeHelmetFeed(base64);
-
-    setAnalysisDuration(Date.now() - startTime);
-
-    // Cross reference RTO
-    const rtoMatch = await verifyPlateInRTO(result.vehicleNumber);
-    if (!rtoMatch && result.vehicleNumber !== 'Unknown') {
-      if (result.violationType === 'NONE') {
-        result.violationType = 'FAKE_PLATE';
-        result.description = `Vehicle ${result.vehicleNumber} not found in central RTO registry.`;
-        result.penaltyAmount = 5000;
-      }
-    }
-
-    setAnalysis(result);
-    setIsAnalyzing(false);
-
-    // Auto SOS if accident
-    if (result.violationType === 'ACCIDENT' && result.confidence > 0.8) {
-      setIsSOSModalOpen(true);
-    }
-
-    if (result.violationType !== 'NONE' && result.confidence > 0.6) {
-      await logViolation(result, canvas.toDataURL('image/jpeg', 0.7));
-    }
-  };
-
   // Run AI Analysis on a Preset Scenario
   const runPresetAnalysis = async (preset: typeof PRESET_SCENARIOS[0]) => {
     setActivePreset(preset);
     setIsAnalyzing(true);
     const startTime = Date.now();
 
-    // Verify plate in RTO
     const rtoMatch = await verifyPlateInRTO(preset.plate);
 
     setTimeout(async () => {
@@ -287,7 +190,7 @@ export default function HelmetView() {
     }, 600);
   };
 
-  // Upload Custom Photo
+  // Upload Custom Photo for analysis
   const handleCustomPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -420,11 +323,7 @@ export default function HelmetView() {
           </div>
           <div>
             <p className="text-[9px] uppercase tracking-widest text-white/40 font-black">Digital Speedometer</p>
-            <p
-              className={`text-2xl font-display font-black tracking-tight ${
-                speedKmH > 60 ? 'text-cyber-red animate-pulse' : 'text-cyber-blue'
-              }`}
-            >
+            <p className={`text-2xl font-display font-black tracking-tight ${speedKmH > 60 ? 'text-cyber-red animate-pulse' : 'text-cyber-blue'}`}>
               {speedKmH} <span className="text-xs text-white/60 font-mono">km/h</span>
             </p>
           </div>
@@ -436,11 +335,7 @@ export default function HelmetView() {
           </div>
           <div>
             <p className="text-[9px] uppercase tracking-widest text-white/40 font-black">IMU Accelerometer</p>
-            <p
-              className={`text-2xl font-display font-black tracking-tight ${
-                gForce > 4.0 ? 'text-cyber-red animate-pulse' : 'text-cyber-green'
-              }`}
-            >
+            <p className={`text-2xl font-display font-black tracking-tight ${gForce > 4.0 ? 'text-cyber-red animate-pulse' : 'text-cyber-green'}`}>
               {gForce} <span className="text-xs text-white/60 font-mono">G</span>
             </p>
           </div>
@@ -472,32 +367,22 @@ export default function HelmetView() {
 
       {/* MAIN COCKPIT GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* LEFT 2 COLUMNS: VIDEO HUD & VISION ENGINE */}
+        {/* LEFT 2 COLUMNS: PRESET SCENARIOS & ANALYSIS */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Active Scenario Display */}
           <div className="glass-panel overflow-hidden relative aspect-video bg-black flex items-center justify-center border-white/10 group">
             {/* Top HUD Badges */}
             <div className="absolute top-4 left-4 z-40 flex items-center gap-2">
               <span className="px-3 py-1 bg-black/80 backdrop-blur-md border border-white/10 rounded-xl text-[9px] font-black uppercase text-cyber-blue flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-cyber-blue animate-pulse" />
-                AEGIS HUD // ACTIVE SENTRY
+                AEGIS HUD // AI SENTRY
               </span>
             </div>
 
             <div className="absolute top-4 right-4 z-40 flex items-center gap-2">
-              <button
-                onClick={() => {
-                  if (isCapturing) {
-                    stopCamera();
-                    setIsCapturing(false);
-                  } else {
-                    setIsCapturing(true);
-                  }
-                }}
-                className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-[10px] font-bold backdrop-blur-md border border-white/10 transition-all flex items-center gap-1.5"
-              >
-                <Camera className="w-3.5 h-3.5" />
-                {isCapturing ? 'Stop WebCam' : 'Start WebCam'}
-              </button>
+              <span className="px-3 py-1 bg-white/10 text-white rounded-xl text-[10px] font-bold backdrop-blur-md border border-white/10">
+                Preset Scenario Mode
+              </span>
             </div>
 
             {/* AI Animated Scanline Overlay */}
@@ -515,43 +400,31 @@ export default function HelmetView() {
               <Crosshair className="w-48 h-48 text-cyber-blue" />
             </div>
 
-            {/* Video or Mock Frame Rendering */}
+            {/* Scenario Image or Placeholder */}
             <AnimatePresence mode="wait">
-              {isCapturing && !cameraError ? (
+              {activePreset ? (
                 <div className="w-full h-full relative">
-                  <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+                  <img src={activePreset.mockImage} alt={activePreset.name} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                  <div className="absolute bottom-4 left-4 right-4 z-40">
+                    <p className="text-white font-display font-black text-lg">{activePreset.name}</p>
+                    <p className="text-white/60 text-xs font-mono">{activePreset.plate}</p>
+                  </div>
                 </div>
               ) : uploadedImagePreview ? (
                 <div className="w-full h-full relative">
                   <img src={uploadedImagePreview} alt="Uploaded Frame" className="w-full h-full object-cover" />
                 </div>
-              ) : activePreset ? (
-                <div className="w-full h-full relative">
-                  <img src={activePreset.mockImage} alt={activePreset.name} className="w-full h-full object-cover" />
-                </div>
               ) : (
                 <div className="text-center p-8 z-30">
-                  <Camera className="w-16 h-16 text-white/20 mx-auto mb-4" />
-                  <h3 className="text-lg font-bold text-white mb-1">Helmet Vision Sentry Standby</h3>
+                  <ShieldCheck className="w-16 h-16 text-white/20 mx-auto mb-4" />
+                  <h3 className="text-lg font-bold text-white mb-1">AI Sentry Standby</h3>
                   <p className="text-xs text-white/40 max-w-sm mx-auto mb-6">
-                    {cameraError || 'Activate your camera feed or select one of the Preset Test Scenarios below to test the AI detection model.'}
+                    Select a preset scenario below or upload a photo to test the AI detection model.
                   </p>
-                  <div className="flex flex-wrap justify-center gap-3">
-                    <button
-                      onClick={() => {
-                        setCameraError(null);
-                        setIsCapturing(true);
-                      }}
-                      className="px-6 py-2.5 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-wider rounded-xl shadow-[0_0_20px_#FF6B35]"
-                    >
-                      Connect Camera Feed
-                    </button>
-                  </div>
                 </div>
               )}
             </AnimatePresence>
-
-            <canvas ref={canvasRef} className="hidden" />
 
             {/* BOTTOM HUD ACTION CONTROLS */}
             <div className="absolute bottom-4 left-4 right-4 z-40 flex justify-between items-end">
@@ -570,24 +443,6 @@ export default function HelmetView() {
                 >
                   <ShieldAlert className="w-5 h-5" />
                 </button>
-
-                <button
-                  onClick={captureAndAnalyze}
-                  disabled={isAnalyzing}
-                  className="px-6 py-3.5 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-wider rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-[0_0_30px_#FF6B35] flex items-center gap-2 disabled:opacity-50"
-                >
-                  {isAnalyzing ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      Neural Scanning...
-                    </>
-                  ) : (
-                    <>
-                      <Eye className="w-4 h-4" />
-                      Scan Visual Frame
-                    </>
-                  )}
-                </button>
               </div>
             </div>
           </div>
@@ -599,7 +454,7 @@ export default function HelmetView() {
                 <Zap className="w-4 h-4 text-cyber-blue" /> Instant AI Test Lab (Preset Scenarios)
               </h3>
               <label className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white rounded-xl text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1.5 border border-white/10">
-                <Upload className="w-3.5 h-3.5" /> Upload Frame Photo
+                <Upload className="w-3.5 h-3.5" /> Upload Photo
                 <input type="file" accept="image/*" onChange={handleCustomPhotoUpload} className="hidden" />
               </label>
             </div>
@@ -718,7 +573,7 @@ export default function HelmetView() {
               ) : (
                 <div className="py-12 text-center text-white/30 text-xs">
                   <ShieldCheck className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                  No visual detection active. Trigger a scan or select a test scenario.
+                  No visual detection active. Select a preset scenario or upload a photo.
                 </div>
               )}
             </AnimatePresence>
