@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, LayoutDashboard, Settings, User, LogOut, Menu, X, ShieldAlert, Cpu, Activity, Database, Gauge, AlertTriangle } from 'lucide-react';
+import { Shield, LayoutDashboard, Settings, User, LogOut, Menu, X, ShieldAlert, Gauge, AlertTriangle, Database } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 
 interface AegisNavbarProps {
   userRole: string | null;
-  onViewChange: (view: 'dashboard' | 'violations' | 'helmet' | 'authority' | 'profile' | 'settings') => void;
+  onViewChange: (view: 'dashboard' | 'violations' | 'authority' | 'profile' | 'settings') => void;
   currentView: string;
   onSignOut?: () => void;
+  onServiceProviderLogin?: () => void;
 }
 
-export default function AegisNavbar({ userRole, onViewChange, currentView, onSignOut }: AegisNavbarProps) {
+export default function AegisNavbar({ userRole, onViewChange, currentView, onSignOut, onServiceProviderLogin }: AegisNavbarProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [profileIncomplete, setProfileIncomplete] = useState(false);
 
@@ -27,10 +28,10 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
     });
   }, []);
 
+  // Feature 2: Removed AI Sentry HUD, kept Dashboard, Violations, Authority, Settings
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: Gauge },
     { id: 'violations', label: 'Violations', icon: AlertTriangle },
-    { id: 'helmet', label: 'AI Sentry HUD', icon: Shield },
     { id: 'authority', label: 'RTO Command Center', icon: LayoutDashboard },
     { id: 'settings', label: 'System Config', icon: Settings },
   ];
@@ -42,7 +43,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
         <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-20">
           <motion.div
             animate={{ x: ['-100%', '200%'] }}
-            transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
+            transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
             className="w-24 h-full bg-gradient-to-r from-transparent via-cyber-blue to-transparent skew-x-12"
           />
         </div>
@@ -56,7 +57,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
             <div className="flex items-center gap-1.5">
               <div className="w-1.5 h-1.5 rounded-full bg-cyber-green animate-pulse" />
               <span className="text-[9px] font-mono text-cyber-blue/80 uppercase tracking-widest">
-                SMART HELMET & RTO v2.4
+                SMART HELMET & RTO v2.5
               </span>
             </div>
           </div>
@@ -95,6 +96,18 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* Feature 11: Service Provider Login Button */}
+          {onServiceProviderLogin && (
+            <button
+              onClick={onServiceProviderLogin}
+              className="hidden sm:flex items-center gap-2 px-3 py-2 bg-cyber-purple/10 border border-cyber-purple/30 rounded-xl text-cyber-purple hover:bg-cyber-purple/20 transition-all"
+              title="Service Provider Login"
+            >
+              <Database className="w-4 h-4" />
+              <span className="text-[9px] font-black uppercase tracking-wider">Provider</span>
+            </button>
+          )}
 
           <button
             id="btn-signout"
@@ -146,6 +159,18 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
                 )}
               </button>
             ))}
+            {onServiceProviderLogin && (
+              <button
+                onClick={() => {
+                  onServiceProviderLogin();
+                  setIsMenuOpen(false);
+                }}
+                className="w-full p-4 rounded-xl text-left text-[11px] font-black uppercase tracking-wider flex items-center gap-3 bg-cyber-purple/10 text-cyber-purple"
+              >
+                <Database className="w-5 h-5" />
+                Service Provider Login
+              </button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
