@@ -321,7 +321,6 @@ export default function AuthorityView() {
         value: typeCounts[k],
       }));
 
-    // Weekly trend mock-up based on timestamp or realistic distribution
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const trendData = days.map((day, idx) => ({
       day,
@@ -329,7 +328,6 @@ export default function AuthorityView() {
       accidents: Math.max(0, Math.round(alerts.length * (0.1 + (idx % 2) * 0.1))),
     }));
 
-    // Hotspot Zones
     const zoneData = [
       { zone: 'KA-01 (Koramangala)', risk: 88, infractions: 34 },
       { zone: 'KA-05 (Jayanagar)', risk: 65, infractions: 22 },
@@ -405,8 +403,8 @@ export default function AuthorityView() {
 
   return (
     <div className="pt-28 pb-16 px-4 sm:px-8 max-w-[1700px] mx-auto space-y-8">
-      {/* GLOBAL HUD STATUS BAR */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+      {/* GLOBAL HUD STATUS BAR - Feature 8: Removed cost/penalties */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         {[
           {
             label: 'Network Sentry',
@@ -431,14 +429,6 @@ export default function AuthorityView() {
             icon: Database,
             color: 'text-cyber-green',
             bg: 'border-cyber-green/20',
-          },
-          {
-            label: 'Penalties Endorsed',
-            value: `₹${analyticsData.totalPenaltiesCollected.toLocaleString()}`,
-            sub: `${analyticsData.resolutionRate}% Compliance Rate`,
-            icon: CreditCard,
-            color: 'text-cyber-purple',
-            bg: 'border-cyber-purple/20',
           },
         ].map((stat, i) => (
           <div key={i} className={`glass-panel p-6 border ${stat.bg} relative overflow-hidden group`}>
@@ -570,7 +560,7 @@ export default function AuthorityView() {
             ))}
           </div>
 
-          {/* Quick Action Buttons for Registry */}
+          {/* Feature 4: Renamed buttons - Download and Upload instead of arrow icons */}
           {activeTab === 'registry' && (
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <button
@@ -579,7 +569,7 @@ export default function AuthorityView() {
                 className="px-4 py-2 bg-cyber-green/10 border border-cyber-green/30 hover:bg-cyber-green hover:text-black text-cyber-green rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(0,255,157,0.2)] disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSeeding ? 'animate-spin' : ''}`} />
-                {isSeeding ? 'Populating...' : 'Seed Sample Database'}
+                {isSeeding ? 'Verifying...' : 'Seed Sample Database'}
               </button>
 
               <button
@@ -591,17 +581,17 @@ export default function AuthorityView() {
 
               <button
                 onClick={handleExportCSV}
-                className="p-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-xl text-[10px] font-bold transition-all"
-                title="Export CSV"
+                className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-2"
+                title="Download CSV"
               >
-                <Download className="w-4 h-4" />
+                <Download className="w-4 h-4" /> Download
               </button>
 
               <label
-                className="p-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-xl cursor-pointer transition-all"
-                title="Import CSV"
+                className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-xl cursor-pointer transition-all flex items-center gap-2 text-[10px] font-black uppercase tracking-wider"
+                title="Upload CSV"
               >
-                <Upload className="w-4 h-4" />
+                <Upload className="w-4 h-4" /> Upload
                 <input type="file" accept=".csv" onChange={handleCSVImport} className="hidden" />
               </label>
             </div>
@@ -667,7 +657,6 @@ export default function AuthorityView() {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                   {filteredViolations.map((v) => {
-                    // Check if plate exists in RTO registry
                     const rtoMatch = vehicles.find(
                       (veh) =>
                         veh.registrationNumber.replace(/[\s-]/g, '').toUpperCase() ===
@@ -729,7 +718,6 @@ export default function AuthorityView() {
                               </span>
                             </div>
 
-                            {/* RTO Status Pill */}
                             <div className="mb-3">
                               {rtoMatch ? (
                                 <span className="inline-flex items-center gap-1 text-[8px] font-black uppercase tracking-wider text-cyber-green bg-cyber-green/10 px-2 py-0.5 rounded border border-cyber-green/20">
@@ -1154,31 +1142,14 @@ export default function AuthorityView() {
 
                   <div>
                     <label className="text-[10px] font-black uppercase tracking-wider text-white/40 mb-1 block">
-                      Vehicle Type
-                    </label>
-                    <select
-                      value={vehicleForm.vehicleType}
-                      onChange={(e) => setVehicleForm({ ...vehicleForm, vehicleType: e.target.value as any })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:border-cyber-blue"
-                    >
-                      <option value="Motorcycle" className="bg-black text-white">Motorcycle</option>
-                      <option value="Scooter" className="bg-black text-white">Scooter</option>
-                      <option value="EV Two-Wheeler" className="bg-black text-white">EV Two-Wheeler</option>
-                      <option value="Car" className="bg-black text-white">Car</option>
-                      <option value="Commercial" className="bg-black text-white">Commercial Vehicle</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-wider text-white/40 mb-1 block">
-                      Owner Legal Name *
+                      Owner Name *
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. Priya Sundaram"
+                      placeholder="Owner full name"
                       value={vehicleForm.ownerName}
                       onChange={(e) => setVehicleForm({ ...vehicleForm, ownerName: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:border-cyber-blue"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:border-cyber-blue"
                     />
                     {formErrors.ownerName && (
                       <p className="text-[9px] text-cyber-red mt-1">{formErrors.ownerName}</p>
@@ -1187,30 +1158,47 @@ export default function AuthorityView() {
 
                   <div>
                     <label className="text-[10px] font-black uppercase tracking-wider text-white/40 mb-1 block">
-                      Owner Contact Phone *
+                      Owner Phone *
                     </label>
                     <input
                       type="tel"
-                      placeholder="e.g. 9880145678"
+                      placeholder="10-15 digits"
                       value={vehicleForm.ownerPhone}
                       onChange={(e) => setVehicleForm({ ...vehicleForm, ownerPhone: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:border-cyber-blue"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:border-cyber-blue"
                     />
                     {formErrors.ownerPhone && (
                       <p className="text-[9px] text-cyber-red mt-1">{formErrors.ownerPhone}</p>
                     )}
                   </div>
 
-                  <div className="sm:col-span-2">
+                  <div>
                     <label className="text-[10px] font-black uppercase tracking-wider text-white/40 mb-1 block">
-                      Make & Model (with color) *
+                      Vehicle Type
+                    </label>
+                    <select
+                      value={vehicleForm.vehicleType}
+                      onChange={(e) => setVehicleForm({ ...vehicleForm, vehicleType: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:border-cyber-blue"
+                    >
+                      <option value="Motorcycle" className="bg-black text-white">Motorcycle</option>
+                      <option value="Scooter" className="bg-black text-white">Scooter</option>
+                      <option value="EV Two-Wheeler" className="bg-black text-white">EV Two-Wheeler</option>
+                      <option value="Car" className="bg-black text-white">Car</option>
+                      <option value="Commercial" className="bg-black text-white">Commercial</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wider text-white/40 mb-1 block">
+                      Make & Model *
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. Honda Activa 6G Premium (Pearl Siren Blue)"
+                      placeholder="e.g. Honda Activa 6G"
                       value={vehicleForm.makeModel}
                       onChange={(e) => setVehicleForm({ ...vehicleForm, makeModel: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:border-cyber-blue"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:border-cyber-blue"
                     />
                     {formErrors.makeModel && (
                       <p className="text-[9px] text-cyber-red mt-1">{formErrors.makeModel}</p>
@@ -1223,8 +1211,8 @@ export default function AuthorityView() {
                     </label>
                     <select
                       value={vehicleForm.status}
-                      onChange={(e) => setVehicleForm({ ...vehicleForm, status: e.target.value as any })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:border-cyber-blue"
+                      onChange={(e) => setVehicleForm({ ...vehicleForm, status: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:border-cyber-blue"
                     >
                       <option value="Active" className="bg-black text-white">Active</option>
                       <option value="Suspended" className="bg-black text-white">Suspended</option>
@@ -1235,38 +1223,38 @@ export default function AuthorityView() {
 
                   <div>
                     <label className="text-[10px] font-black uppercase tracking-wider text-white/40 mb-1 block">
-                      RTO District Zone
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. KA-05 (Jayanagar, Bangalore)"
-                      value={vehicleForm.rtoZone}
-                      onChange={(e) => setVehicleForm({ ...vehicleForm, rtoZone: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:border-cyber-blue"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-wider text-white/40 mb-1 block">
                       Insurance Valid Until
                     </label>
                     <input
                       type="date"
                       value={vehicleForm.insuranceValidUntil}
                       onChange={(e) => setVehicleForm({ ...vehicleForm, insuranceValidUntil: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:border-cyber-blue"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:border-cyber-blue"
                     />
                   </div>
 
                   <div>
                     <label className="text-[10px] font-black uppercase tracking-wider text-white/40 mb-1 block">
-                      PUC / Pollution Valid Until
+                      PUC Valid Until
                     </label>
                     <input
                       type="date"
                       value={vehicleForm.pucValidUntil}
                       onChange={(e) => setVehicleForm({ ...vehicleForm, pucValidUntil: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:border-cyber-blue"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:border-cyber-blue"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wider text-white/40 mb-1 block">
+                      RTO Zone
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. KA-01 (Bangalore Central)"
+                      value={vehicleForm.rtoZone}
+                      onChange={(e) => setVehicleForm({ ...vehicleForm, rtoZone: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:border-cyber-blue"
                     />
                   </div>
 
@@ -1276,10 +1264,10 @@ export default function AuthorityView() {
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. ME4JF504HK801294"
+                      placeholder="Chassis number"
                       value={vehicleForm.chassisNumber}
                       onChange={(e) => setVehicleForm({ ...vehicleForm, chassisNumber: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white uppercase font-mono focus:border-cyber-blue"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:border-cyber-blue"
                     />
                   </div>
 
@@ -1289,330 +1277,68 @@ export default function AuthorityView() {
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. JF50E8019482"
+                      placeholder="Engine number"
                       value={vehicleForm.engineNumber}
                       onChange={(e) => setVehicleForm({ ...vehicleForm, engineNumber: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white uppercase font-mono focus:border-cyber-blue"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:border-cyber-blue"
                     />
                   </div>
 
-                  <div className="sm:col-span-2 flex items-center gap-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wider text-white/40 mb-1 block">
+                      Registration Date
+                    </label>
+                    <input
+                      type="date"
+                      value={vehicleForm.registrationDate}
+                      onChange={(e) => setVehicleForm({ ...vehicleForm, registrationDate: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:border-cyber-blue"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-3">
                     <input
                       type="checkbox"
                       id="stolenFlag"
                       checked={vehicleForm.stolenFlag}
                       onChange={(e) => setVehicleForm({ ...vehicleForm, stolenFlag: e.target.checked })}
-                      className="w-4 h-4 accent-cyber-red rounded cursor-pointer"
+                      className="w-4 h-4 accent-cyber-blue rounded"
                     />
-                    <label htmlFor="stolenFlag" className="text-xs text-red-200 font-bold cursor-pointer">
-                      Flag as Reported Stolen / Active FIR Lookout (Triggers Critical Sentry Alarm)
+                    <label htmlFor="stolenFlag" className="text-xs text-white/60">
+                      Mark as Stolen
                     </label>
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-3 pt-4 border-t border-white/10">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-white/40 mb-1 block">
+                    Notes
+                  </label>
+                  <textarea
+                    placeholder="Additional notes..."
+                    value={vehicleForm.notes}
+                    onChange={(e) => setVehicleForm({ ...vehicleForm, notes: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:border-cyber-blue resize-none"
+                    rows={3}
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-4">
                   <button
                     type="button"
                     onClick={() => setIsAddVehicleOpen(false)}
-                    className="px-6 py-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-bold text-white/60"
+                    className="flex-1 py-3 bg-white/5 border border-white/10 text-white/60 rounded-xl text-sm font-bold hover:bg-white/10 transition-all"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="px-8 py-2.5 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-wider rounded-xl shadow-[0_0_20px_#FF6B35]"
+                    className="flex-1 py-3 bg-cyber-blue text-black rounded-xl text-sm font-black hover:scale-[1.02] transition-all"
                   >
-                    Save to Central RTO
+                    Register Vehicle
                   </button>
                 </div>
               </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* MODAL 2: VEHICLE DETAILS & RC CERTIFICATE VIEWER */}
-      <AnimatePresence>
-        {selectedVehicle && (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="glass-panel w-full max-w-xl p-8 relative border-white/10"
-            >
-              <div className="flex justify-between items-start mb-6">
-                <div>
-                  <span className="text-[9px] font-mono uppercase tracking-widest text-cyber-blue">
-                    RTO Ministry of Road Transport & Highways
-                  </span>
-                  <h2 className="text-2xl font-display font-black text-white mt-1">
-                    {selectedVehicle.registrationNumber}
-                  </h2>
-                </div>
-                <button
-                  onClick={() => setSelectedVehicle(null)}
-                  className="p-2 text-white/40 hover:text-white rounded-lg"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {selectedVehicle.stolenFlag && (
-                <div className="p-4 bg-cyber-red/20 border border-cyber-red/40 rounded-2xl flex items-center gap-3 text-cyber-red mb-6 animate-pulse">
-                  <ShieldAlert className="w-6 h-6 shrink-0" />
-                  <div>
-                    <p className="text-xs font-black uppercase">CRITICAL: STOLEN VEHICLE LOOKOUT ACTIVE</p>
-                    <p className="text-[10px] text-red-200/70">
-                      Vehicle is flagged in the Police National Crime Records Bureau database.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              <div className="bg-black/60 border border-white/10 rounded-2xl p-6 space-y-4 mb-6">
-                <div className="grid grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <span className="text-[9px] uppercase tracking-wider text-white/40 block">Registered Owner</span>
-                    <span className="font-bold text-white text-sm">{selectedVehicle.ownerName}</span>
-                  </div>
-
-                  <div>
-                    <span className="text-[9px] uppercase tracking-wider text-white/40 block">Owner Contact</span>
-                    <a
-                      href={`tel:${selectedVehicle.ownerPhone}`}
-                      className="font-mono text-cyber-blue font-bold hover:underline"
-                    >
-                      {selectedVehicle.ownerPhone}
-                    </a>
-                  </div>
-
-                  <div>
-                    <span className="text-[9px] uppercase tracking-wider text-white/40 block">Make & Model</span>
-                    <span className="text-white font-medium">{selectedVehicle.makeModel}</span>
-                  </div>
-
-                  <div>
-                    <span className="text-[9px] uppercase tracking-wider text-white/40 block">Vehicle Class</span>
-                    <span className="text-white font-medium">{selectedVehicle.vehicleType}</span>
-                  </div>
-
-                  <div>
-                    <span className="text-[9px] uppercase tracking-wider text-white/40 block">RC Status</span>
-                    <span
-                      className={`inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase ${
-                        selectedVehicle.status === 'Active'
-                          ? 'bg-cyber-green text-black'
-                          : 'bg-cyber-red text-white'
-                      }`}
-                    >
-                      {selectedVehicle.status}
-                    </span>
-                  </div>
-
-                  <div>
-                    <span className="text-[9px] uppercase tracking-wider text-white/40 block">RTO Zone</span>
-                    <span className="text-white">{selectedVehicle.rtoZone}</span>
-                  </div>
-
-                  <div>
-                    <span className="text-[9px] uppercase tracking-wider text-white/40 block">Insurance Validity</span>
-                    <span className="text-white font-mono">{selectedVehicle.insuranceValidUntil || 'N/A'}</span>
-                  </div>
-
-                  <div>
-                    <span className="text-[9px] uppercase tracking-wider text-white/40 block">Pollution (PUC)</span>
-                    <span className="text-white font-mono">{selectedVehicle.pucValidUntil || 'N/A'}</span>
-                  </div>
-
-                  <div>
-                    <span className="text-[9px] uppercase tracking-wider text-white/40 block">Chassis No.</span>
-                    <span className="text-white/60 font-mono text-[10px]">{selectedVehicle.chassisNumber || 'N/A'}</span>
-                  </div>
-
-                  <div>
-                    <span className="text-[9px] uppercase tracking-wider text-white/40 block">Engine No.</span>
-                    <span className="text-white/60 font-mono text-[10px]">{selectedVehicle.engineNumber || 'N/A'}</span>
-                  </div>
-                </div>
-
-                {selectedVehicle.notes && (
-                  <div className="pt-3 border-t border-white/10">
-                    <span className="text-[9px] uppercase tracking-wider text-white/40 block mb-1">RTO File Notes</span>
-                    <p className="text-[11px] text-white/70 italic">"{selectedVehicle.notes}"</p>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex justify-between items-center">
-                <button
-                  onClick={() => handleDeleteVehicle(selectedVehicle.registrationNumber)}
-                  className="px-4 py-2 bg-cyber-red/10 border border-cyber-red/30 text-cyber-red hover:bg-cyber-red hover:text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2"
-                >
-                  <Trash2 className="w-3.5 h-3.5" /> Remove from Registry
-                </button>
-                <button
-                  onClick={() => setSelectedVehicle(null)}
-                  className="px-6 py-2 bg-white/10 text-white hover:bg-white/20 rounded-xl text-xs font-bold transition-all"
-                >
-                  Close
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* MODAL 3: VIOLATION INSPECTION & CHALLAN ISSUER */}
-      <AnimatePresence>
-        {selectedViolation && (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="glass-panel w-full max-w-2xl max-h-[90vh] overflow-y-auto p-8 relative border-white/10"
-            >
-              <div className="flex justify-between items-start mb-6">
-                <div>
-                  <span className="text-[9px] font-mono uppercase tracking-widest text-cyber-orange">
-                    Infraction Case Dossier
-                  </span>
-                  <h2 className="text-2xl font-display font-black text-white mt-1">
-                    {selectedViolation.vehicleNumber}
-                  </h2>
-                </div>
-                <button
-                  onClick={() => setSelectedViolation(null)}
-                  className="p-2 text-white/40 hover:text-white rounded-lg"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                {/* Evidence Image */}
-                <div className="rounded-2xl overflow-hidden bg-black border border-white/10 aspect-video relative">
-                  {selectedViolation.photoUrl ? (
-                    <img
-                      src={selectedViolation.photoUrl}
-                      alt="Violation Evidence"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-white/30 text-xs">
-                      No Visual Evidence Snapshot
-                    </div>
-                  )}
-                  <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/80 backdrop-blur-md rounded text-[8px] font-mono text-white/70">
-                    Confidence: {((selectedViolation.confidence || 0.85) * 100).toFixed(0)}%
-                  </div>
-                </div>
-
-                {/* Violation Details */}
-                <div className="space-y-3 text-xs">
-                  <div>
-                    <span className="text-[9px] uppercase tracking-wider text-white/40 block">Offense Classification</span>
-                    <span className="font-display font-black text-cyber-orange text-base uppercase">
-                      {selectedViolation.type}
-                    </span>
-                  </div>
-
-                  <div>
-                    <span className="text-[9px] uppercase tracking-wider text-white/40 block">AI Vision Description</span>
-                    <p className="text-white/80 leading-relaxed text-[11px] italic">
-                      "{selectedViolation.description}"
-                    </p>
-                  </div>
-
-                  <div>
-                    <span className="text-[9px] uppercase tracking-wider text-white/40 block">Recommended Penalty Fine</span>
-                    <span className="font-display font-black text-cyber-green text-lg">
-                      ₹{selectedViolation.penaltyAmount || 1000}
-                    </span>
-                  </div>
-
-                  <div>
-                    <span className="text-[9px] uppercase tracking-wider text-white/40 block">Current Case Status</span>
-                    <span
-                      className={`inline-block px-2.5 py-0.5 rounded text-[9px] font-black uppercase ${
-                        selectedViolation.status === 'Resolved' || selectedViolation.status === 'Endorsed'
-                          ? 'bg-cyber-green text-black'
-                          : selectedViolation.status === 'Spam'
-                          ? 'bg-white/20 text-white'
-                          : 'bg-cyber-orange text-white'
-                      }`}
-                    >
-                      {selectedViolation.status || 'Pending'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* RTO Cross-Check Box */}
-              {(() => {
-                const rtoMatch = vehicles.find(
-                  (veh) =>
-                    veh.registrationNumber.replace(/[\s-]/g, '').toUpperCase() ===
-                    selectedViolation.vehicleNumber.replace(/[\s-]/g, '').toUpperCase()
-                );
-
-                return (
-                  <div className="p-4 bg-white/5 border border-white/10 rounded-2xl mb-6">
-                    <p className="text-[9px] font-black uppercase tracking-widest text-cyber-blue mb-2 flex items-center gap-1.5">
-                      <Database className="w-3.5 h-3.5" /> Central RTO Cross-Reference Verification
-                    </p>
-                    {rtoMatch ? (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
-                        <div>
-                          <span className="text-white/40 block text-[8px]">Owner:</span>
-                          <span className="text-white font-bold">{rtoMatch.ownerName}</span>
-                        </div>
-                        <div>
-                          <span className="text-white/40 block text-[8px]">Make/Model:</span>
-                          <span className="text-white">{rtoMatch.makeModel}</span>
-                        </div>
-                        <div>
-                          <span className="text-white/40 block text-[8px]">RC Status:</span>
-                          <span className="text-cyber-green font-bold">{rtoMatch.status}</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-cyber-red font-bold flex items-center gap-2">
-                        <AlertTriangle className="w-4 h-4" /> NO RECORD IN RTO REGISTRY — PROBABLE FAKE / UNREGISTERED PLATE
-                      </p>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* Action Buttons */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-white/10">
-                <button
-                  onClick={() => updateViolationStatus(selectedViolation.id, 'Spam')}
-                  className="px-4 py-2.5 bg-white/5 hover:bg-white/10 text-white/50 hover:text-white rounded-xl text-xs font-bold transition-all"
-                >
-                  Discard as False Positive
-                </button>
-
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => updateViolationStatus(selectedViolation.id, 'Resolved')}
-                    className="px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all"
-                  >
-                    Mark Resolved
-                  </button>
-
-                  <button
-                    onClick={() =>
-                      updateViolationStatus(selectedViolation.id, 'Endorsed', selectedViolation.penaltyAmount || 1000)
-                    }
-                    className="px-6 py-2.5 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-wider rounded-xl shadow-[0_0_20px_#FF6B35] hover:scale-105 transition-all"
-                  >
-                    Issue Official e-Challan
-                  </button>
-                </div>
-              </div>
             </motion.div>
           </div>
         )}
