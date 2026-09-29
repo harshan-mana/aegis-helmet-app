@@ -17,6 +17,8 @@ import {
   WifiOff,
   CheckCircle,
   X,
+  Car,
+  Signal,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -32,6 +34,14 @@ interface SavedContact {
   id: string;
   name: string;
   phone: string;
+}
+
+interface DetectedVehicle {
+  id: string;
+  plate: string;
+  distance: number;
+  speed: number;
+  type: string;
 }
 
 const DEFAULT_EMERGENCY_CONTACTS: EmergencyContact[] = [
@@ -67,6 +77,14 @@ export default function DashboardView() {
   const [detectionActive, setDetectionActive] = useState(false);
   const [detectedObjects, setDetectedObjects] = useState<string[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
+
+  // Feature 1: Detected vehicles with license plates
+  const [detectedVehicles, setDetectedVehicles] = useState<DetectedVehicle[]>([]);
+
+  // Feature 7: Tracking state
+  const [isTracking, setIsTracking] = useState(false);
+  const [wifiRange, setWifiRange] = useState(0);
+  const [trackingData, setTrackingData] = useState<{ lat: number; lng: number; speed: number; timestamp: number }[]>([]);
 
   // Emergency contacts state
   const [savedContacts, setSavedContacts] = useState<SavedContact[]>(() => {
@@ -155,6 +173,60 @@ export default function DashboardView() {
     };
   }, []);
 
+  // Feature 1: Vehicle detection simulator
+  useEffect(() => {
+    if (!detectionActive || !isWebcamActive) {
+      setDetectedVehicles([]);
+      return;
+    }
+
+    const generateVehicles = () => {
+      const vehicleTypes = ['Motorcycle', 'Car', 'Truck', 'Scooter'];
+      const plates = [
+        'KA-01-AB-1234', 'KA-02-CD-5678', 'KA-03-EF-9012',
+        'KA-04-GH-3456', 'KA-05-IJ-7890', 'MH-12-KL-2345',
+        'DL-06-MN-6789', 'TN-07-OP-0123'
+      ];
+      const count = Math.floor(Math.random() * 4) + 1;
+      const vehicles: DetectedVehicle[] = [];
+      for (let i = 0; i < count; i++) {
+        vehicles.push({
+          id: `vehicle-${i}`,
+          plate: plates[Math.floor(Math.random() * plates.length)],
+          distance: Math.floor(Math.random() * 50) + 5,
+          speed: Math.floor(Math.random() * 80) + 20,
+          type: vehicleTypes[Math.floor(Math.random() * vehicleTypes.length)],
+        });
+      }
+      setDetectedVehicles(vehicles);
+    };
+
+    generateVehicles();
+    const interval = setInterval(generateVehicles, 3000);
+    return () => clearInterval(interval);
+  }, [detectionActive, isWebcamActive]);
+
+  // Feature 7: Tracking with wifi range data
+  useEffect(() => {
+    if (!isTracking || !isWebcamActive) return;
+
+    const interval = setInterval(() => {
+      setWifiRange(Math.floor(Math.random() * 100) + 1);
+      if (gpsCoords) {
+        setTrackingData((prev) => [
+          ...prev.slice(-50),
+          {
+            lat: gpsCoords.lat + (Math.random() - 0.5) * 0.001,
+            lng: gpsCoords.lng + (Math.random() - 0.5) * 0.001,
+            speed: speedKmh,
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isTracking, isWebcamActive, gpsCoords, speedKmh]);
+
   // Webcam controls
   const startWebcam = useCallback(async () => {
     setWebcamError(null);
@@ -165,6 +237,8 @@ export default function DashboardView() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         setIsWebcamActive(true);
+        // Feature 7: Auto-start tracking when camera starts
+        setIsTracking(true);
       }
     } catch (err: any) {
       console.warn('Camera access failed:', err);
@@ -187,6 +261,8 @@ export default function DashboardView() {
     setIsWebcamActive(false);
     setDetectionActive(false);
     setDetectedObjects([]);
+    setIsTracking(false);
+    setTrackingData([]);
   }, []);
 
   // YOLOv8-style object detection simulation
@@ -194,10 +270,8 @@ export default function DashboardView() {
     if (!isWebcamActive) return;
     setIsDetecting(true);
 
-    // Simulate YOLOv8 detection delay
     await new Promise((r) => setTimeout(r, 1500));
 
-    // Simulated detection results
     const possibleDetections = [
       ['helmet', 'person', 'motorcycle'],
       ['no_helmet', 'person', 'motorcycle'],
@@ -246,24 +320,13 @@ export default function DashboardView() {
     }
   };
 
-  const getContactColor = (type: string) => {
-    switch (type) {
-      case 'police': return 'text-blue-400 bg-blue-400/10 border-blue-400/30';
-      case 'ambulance': return 'text-red-400 bg-red-400/10 border-red-400/30';
-      case 'fire': return 'text-orange-400 bg-orange-400/10 border-orange-400/30';
-      default: return 'text-green-400 bg-green-400/10 border-green-400/30';
-    }
-  };
-
-  // Speed gauge calculation
-  const speedAngle = (speedKmh / 120) * 240 - 120; // -120 to 120 degrees
   const speedColor = speedKmh > 80 ? '#FF4D4D' : speedKmh > 50 ? '#FFB347' : '#FFD18C';
 
   return (
     <div className="pt-24 pb-16 px-4 sm:px-8 max-w-[1700px] mx-auto space-y-6">
       {/* TOP HUD - 4 METRICS */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* 1. Digital Speedometer */}
+        {/* 1. Digital Speedometer with Detected Vehicles */}
         <div className="glass-panel p-5 border-cyber-blue/20 relative overflow-hidden">
           <div className="flex items-center gap-2 mb-3">
             <Gauge className="w-5 h-5 text-cyber-blue" />
@@ -275,7 +338,6 @@ export default function DashboardView() {
             </span>
             <span className="text-sm text-white/50 font-mono mb-1">km/h</span>
           </div>
-          {/* Mini speed bar */}
           <div className="mt-3 h-2 bg-white/5 rounded-full overflow-hidden">
             <motion.div
               className="h-full rounded-full"
@@ -297,6 +359,29 @@ export default function DashboardView() {
               />
             ))}
           </div>
+
+          {/* Feature 1: Detected Vehicles with License Plates */}
+          {detectedVehicles.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-white/10">
+              <p className="text-[9px] font-black uppercase tracking-widest text-cyber-blue mb-2 flex items-center gap-1">
+                <Car className="w-3 h-3" /> Detected Vehicles
+              </p>
+              <div className="space-y-1.5 max-h-[120px] overflow-y-auto">
+                {detectedVehicles.map((vehicle, idx) => (
+                  <div key={vehicle.id} className="flex items-center justify-between bg-white/5 rounded-lg px-2 py-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] font-mono text-white/40">#{idx + 1}</span>
+                      <span className="text-[10px] font-bold text-white">{vehicle.plate}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[9px] font-mono">
+                      <span className="text-cyber-green">{vehicle.distance}m</span>
+                      <span className="text-white/50">{vehicle.speed}km/h</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 2. IMU Accelerometer */}
@@ -420,7 +505,7 @@ export default function DashboardView() {
         </div>
       </div>
 
-      {/* MAIN CONTENT: WEBCAM + DETECTION */}
+      {/* MAIN CONTENT: WEBCAM + DETECTION + TRACKING */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Webcam Feed - Takes 2 columns */}
         <div className="lg:col-span-2 space-y-4">
@@ -435,6 +520,12 @@ export default function DashboardView() {
                 <span className="px-3 py-1 bg-black/80 backdrop-blur-md border border-cyber-purple/30 rounded-xl text-[9px] font-black uppercase text-cyber-purple flex items-center gap-1.5">
                   <Crosshair className="w-3 h-3" />
                   YOLOv8 ACTIVE
+                </span>
+              )}
+              {isTracking && (
+                <span className="px-3 py-1 bg-black/80 backdrop-blur-md border border-cyber-green/30 rounded-xl text-[9px] font-black uppercase text-cyber-green flex items-center gap-1.5">
+                  <Signal className="w-3 h-3" />
+                  TRACKING
                 </span>
               )}
             </div>
@@ -483,14 +574,12 @@ export default function DashboardView() {
                   {/* Detection overlay */}
                   {detectionActive && (
                     <div className="absolute inset-0 pointer-events-none z-30">
-                      {/* Scanning line */}
                       <motion.div
                         initial={{ y: '-10%' }}
                         animate={{ y: '110%' }}
-                        transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+                        transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
                         className="w-full h-1 bg-gradient-to-r from-transparent via-cyber-purple/50 to-transparent"
                       />
-                      {/* Detection boxes */}
                       {detectedObjects.length > 0 && (
                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                           <motion.div
@@ -516,7 +605,7 @@ export default function DashboardView() {
                   <Camera className="w-16 h-16 text-white/10 mx-auto mb-4" />
                   <h3 className="text-lg font-bold text-white/60 mb-1">Camera Standby</h3>
                   <p className="text-xs text-white/30 max-w-sm mx-auto">
-                    {webcamError || 'Start your camera to enable YOLOv8 object detection for helmet, rider, and license plate recognition.'}
+                    {webcamError || 'Start your camera to enable YOLOv8 object detection and vehicle tracking.'}
                   </p>
                 </div>
               )}
@@ -543,6 +632,40 @@ export default function DashboardView() {
               )}
             </div>
           </div>
+
+          {/* Feature 7: Tracking Data Panel */}
+          {isTracking && (
+            <div className="glass-panel p-5 border-cyber-green/20">
+              <h3 className="text-xs font-black uppercase tracking-widest text-white mb-4 flex items-center gap-2">
+                <Signal className="w-4 h-4 text-cyber-green" /> Live Tracking Data
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-white/5 rounded-lg p-3 text-center">
+                  <p className="text-[9px] text-white/40 uppercase">WiFi Range</p>
+                  <p className="text-lg font-display font-black text-cyber-green">{wifiRange}%</p>
+                </div>
+                <div className="bg-white/5 rounded-lg p-3 text-center">
+                  <p className="text-[9px] text-white/40 uppercase">Data Points</p>
+                  <p className="text-lg font-display font-black text-cyber-blue">{trackingData.length}</p>
+                </div>
+                <div className="bg-white/5 rounded-lg p-3 text-center">
+                  <p className="text-[9px] text-white/40 uppercase">Speed</p>
+                  <p className="text-lg font-display font-black text-cyber-purple">{speedKmh.toFixed(0)} km/h</p>
+                </div>
+                <div className="bg-white/5 rounded-lg p-3 text-center">
+                  <p className="text-[9px] text-white/40 uppercase">Status</p>
+                  <p className="text-lg font-display font-black text-cyber-green">Active</p>
+                </div>
+              </div>
+              {trackingData.length > 0 && (
+                <div className="mt-3 p-3 bg-black/40 rounded-lg">
+                  <p className="text-[9px] font-mono text-white/50">
+                    Last update: {new Date(trackingData[trackingData.length - 1]?.timestamp).toLocaleTimeString()}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Detection Results Panel */}
           <div className="glass-panel p-5 border-white/10">
@@ -607,6 +730,7 @@ export default function DashboardView() {
                 { label: 'Camera Module', status: isWebcamActive ? 'Active' : 'Standby', color: isWebcamActive ? 'text-cyber-green' : 'text-white/40' },
                 { label: 'GPS Module', status: gpsStatus === 'locked' ? 'Locked' : 'Searching', color: gpsStatus === 'locked' ? 'text-cyber-green' : 'text-cyber-orange' },
                 { label: 'IMU Sensor', status: isMoving ? 'Active' : 'Idle', color: isMoving ? 'text-cyber-green' : 'text-white/40' },
+                { label: 'Tracking', status: isTracking ? 'Active' : 'Off', color: isTracking ? 'text-cyber-green' : 'text-white/40' },
                 { label: 'Internet', status: 'Connected', color: 'text-cyber-green' },
               ].map((item, i) => (
                 <div key={i} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
