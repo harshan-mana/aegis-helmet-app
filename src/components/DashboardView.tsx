@@ -237,8 +237,10 @@ export default function DashboardView() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         setIsWebcamActive(true);
-        // Feature 7: Auto-start tracking when camera starts
+        // Auto-start tracking when camera starts
         setIsTracking(true);
+        // Auto-start detection when camera starts
+        setDetectionActive(true);
       }
     } catch (err: any) {
       console.warn('Camera access failed:', err);
@@ -251,6 +253,11 @@ export default function DashboardView() {
       }
     }
   }, []);
+
+  // Auto-start camera and detection on component mount
+  useEffect(() => {
+    startWebcam();
+  }, [startWebcam]);
 
   const stopWebcam = useCallback(() => {
     if (videoRef.current && videoRef.current.srcObject) {
