@@ -100,8 +100,7 @@ export default function App() {
   const handleAuthSuccess = (authUser: AegisAuthUser) => {
     setLocalUser(authUser);
     setUserRole(authUser.role || 'Driver');
-    setNeedsProfile(false);
-    setShowOnboarding(false);
+    // Don't set needsProfile to false here - let the snapshot listener determine this
     setCurrentView('dashboard');
     setIsAuthModalOpen(false);
   };
@@ -122,6 +121,20 @@ export default function App() {
       console.warn('LocalStorage error:', e);
     }
     handleAuthSuccess(guest);
+    // For guest users, check if profile is incomplete and show onboarding
+    const savedProfile = localStorage.getItem('aegis_user_profile');
+    if (savedProfile) {
+      const profile = JSON.parse(savedProfile);
+      const isMissingInfo = !profile.phone || !profile.emergencyContact1?.phone;
+      if (isMissingInfo) {
+        setNeedsProfile(true);
+        setShowOnboarding(true);
+      }
+    } else {
+      // No profile saved yet - show onboarding
+      setNeedsProfile(true);
+      setShowOnboarding(true);
+    }
   };
 
   const handleSignOut = async () => {
@@ -190,6 +203,20 @@ export default function App() {
       return;
     }
 
+    // Save to localStorage for all users (including guests)
+    const profileData = {
+      name: onboardingData.name,
+      phone: onboardingData.phone,
+      emergencyContact1: {
+        name: onboardingData.guardianName,
+        phone: onboardingData.guardianPhone
+      },
+      autoReport: true,
+      guardianNotifications: true,
+    };
+    localStorage.setItem('aegis_user_profile', JSON.stringify(profileData));
+
+    // Also save to Firestore for authenticated users
     if (user) {
       try {
         await updateDoc(doc(db, 'users', user.uid), {
