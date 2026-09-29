@@ -3,22 +3,14 @@ import { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup, onAuthStat
 import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-// Ensure authDomain includes the production domain
-const productionDomain = window.location.hostname;
-const config = {
-  ...firebaseConfig,
-  authDomain: productionDomain.includes('github.io')
-    ? productionDomain
-    : firebaseConfig.authDomain,
-};
-
-const app = initializeApp(config);
-export const db = getFirestore(app, config.firestoreDatabaseId || '(default)');
+// Always use the Firebase auth domain - authorized domains are managed in Firebase Console
+const app = initializeApp(firebaseConfig);
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || '(default)');
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 export const appleProvider = new OAuthProvider('apple.com');
 
-// Enable Firebase Auth for production domain
+// Enable Firebase Auth
 try {
   auth.useDeviceLanguage();
 } catch (e) {
