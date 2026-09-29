@@ -3,14 +3,14 @@ import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, ShieldAlert, User, Phone, Save, X, Zap } from 'lucide-react';
+import { Shield, ShieldAlert, User, Phone, Save, X, Zap, Settings } from 'lucide-react';
 import AegisNavbar from './components/AegisNavbar';
-import HelmetView from './components/HelmetView';
 import AuthorityView from './components/AuthorityView';
 import SettingsView from './components/SettingsView';
 import DashboardView from './components/DashboardView';
 import ViolationsView from './components/ViolationsView';
 import AuthModal from './components/AuthModal';
+import ServiceProviderLogin from './components/ServiceProviderLogin';
 import { AegisAuthUser, LOCAL_AUTH_STORAGE_KEY } from './types/auth';
 
 export default function App() {
@@ -35,9 +35,11 @@ export default function App() {
       return null;
     }
   });
-  const [currentView, setCurrentView] = useState<'dashboard' | 'violations' | 'helmet' | 'authority' | 'profile' | 'settings'>('dashboard');
+  // Feature 2: Dashboard is now the default view, AI Sentry HUD removed
+  const [currentView, setCurrentView] = useState<'dashboard' | 'violations' | 'authority' | 'profile' | 'settings'>('dashboard');
   const [loading, setLoading] = useState(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isServiceProviderOpen, setIsServiceProviderOpen] = useState(false);
   const [needsProfile, setNeedsProfile] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingErrors, setOnboardingErrors] = useState<{[key: string]: string}>({});
@@ -58,27 +60,18 @@ export default function App() {
       if (unsubscribeProfile) unsubscribeProfile();
 
       if (u) {
-        // Real-time listener for user profile
         unsubscribeProfile = onSnapshot(doc(db, 'users', u.uid), (snapshot) => {
           if (snapshot.exists()) {
             const data = snapshot.data();
             setUserRole(data.role || 'Driver');
             
-            // Onboarding logic: check for missing essential fields
             const isMissingInfo = !data.phone || !data.emergencyContact1?.phone || data.phone === '' || data.emergencyContact1?.phone === '';
             setNeedsProfile(isMissingInfo);
             
-            // Only show onboarding if user just logged in and info is missing
             if (isMissingInfo && !showOnboarding) {
               setShowOnboarding(true);
             }
-            
-            // If missing info and currently on helmet view, force settings view
-            if (isMissingInfo && currentView === 'helmet') {
-              setCurrentView('settings');
-            }
           } else {
-            // New user setup
             handleNewUser(u.uid, u.email || '');
           }
           setLoading(false);
@@ -102,7 +95,7 @@ export default function App() {
       unsubscribeAuth();
       if (unsubscribeProfile) unsubscribeProfile();
     };
-  }, [currentView, localUser]);
+  }, [localUser]);
 
   const handleAuthSuccess = (authUser: AegisAuthUser) => {
     setLocalUser(authUser);
@@ -284,6 +277,7 @@ export default function App() {
         onViewChange={setCurrentView} 
         currentView={currentView}
         onSignOut={handleSignOut}
+        onServiceProviderLogin={() => setIsServiceProviderOpen(true)}
       />
       
       <main>
@@ -326,6 +320,17 @@ export default function App() {
                    Continue as Guest
                  </button>
                </div>
+
+               {/* Feature 11: Service Provider Login */}
+               <div className="mt-8">
+                 <button
+                   onClick={() => setIsServiceProviderOpen(true)}
+                   className="text-white/40 hover:text-white/70 text-xs font-mono uppercase tracking-widest transition-colors flex items-center gap-2 mx-auto"
+                 >
+                   <Settings className="w-3.5 h-3.5" />
+                   Service Provider Login
+                 </button>
+               </div>
              </div>
           </div>
         ) : (
@@ -339,20 +344,6 @@ export default function App() {
             >
               {currentView === 'dashboard' && <DashboardView />}
               {currentView === 'violations' && <ViolationsView />}
-              {currentView === 'helmet' && !needsProfile && <HelmetView />}
-              {currentView === 'helmet' && needsProfile && (
-                <div className="flex flex-col items-center justify-center p-12 text-center space-y-4 pt-32">
-                  <ShieldAlert className="w-12 h-12 text-brand-primary animate-pulse" />
-                  <h2 className="text-2xl font-bold uppercase tracking-tighter">Profile Setup Required</h2>
-                  <p className="text-white/40 max-w-xs mx-auto">Please complete your personal and guardian contact details in settings to activate Aegis features.</p>
-                  <button 
-                    onClick={() => setCurrentView('settings')}
-                    className="px-8 py-3 bg-brand-primary text-white rounded-full font-bold text-xs"
-                  >
-                    GO TO SETTINGS
-                  </button>
-                </div>
-              )}
               {currentView === 'authority' && <AuthorityView />}
               {currentView === 'settings' && <SettingsView />}
               {currentView === 'profile' && <div>Profile Settings (Coming Soon)</div>}
@@ -365,6 +356,12 @@ export default function App() {
         isOpen={isAuthModalOpen} 
         onClose={() => setIsAuthModalOpen(false)}
         onLogin={handleAuthSuccess}
+      />
+
+      {/* Feature 11: Service Provider Login Modal */}
+      <ServiceProviderLogin
+        isOpen={isServiceProviderOpen}
+        onClose={() => setIsServiceProviderOpen(false)}
       />
 
       {/* Mandatory Onboarding Modal */}
