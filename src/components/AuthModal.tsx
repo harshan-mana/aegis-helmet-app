@@ -22,7 +22,6 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
   const [isLogin, setIsLogin] = useState(true);
   const [error, setError] = useState('');
   
-  // Realistic simulated OAuth Handshake state
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [activeProvider, setActiveProvider] = useState<AuthProvider>(null);
   const [authStep, setAuthStep] = useState<'connecting' | 'verifying' | 'success'>('connecting');
@@ -72,7 +71,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
     };
   };
 
-  // 1. Real Google OAuth via Firebase popup
+  // Feature 12: Fixed Google OAuth with proper error handling
   const handleGoogleSignIn = async () => {
     setError('');
     setActiveProvider('google');
@@ -91,19 +90,22 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
       setTimeout(handleModalClose, 400);
     } catch (e: any) {
       setIsAuthenticating(false);
+      console.error('Google auth error:', e);
       if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
         setError('Sign-in window was closed. Please try again.');
       } else if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
         setError('Pop-up was blocked. Allow pop-ups for this site and try again.');
       } else if (e.code && (e.code.includes('configuration-not-found') || e.code.includes('admin-restricted-operation'))) {
         setError('Google sign-in is not enabled yet. Enable it in Firebase Console → Authentication → Sign-in method.');
+      } else if (e.code === 'auth/account-exists-with-different-credential') {
+        setError('An account already exists with this email. Try signing in with a different method.');
       } else {
         setError(e?.message || 'Google sign-in failed. Please try again.');
       }
     }
   };
 
-  // 2. Real Apple OAuth via Firebase popup
+  // Feature 12: Fixed Apple OAuth with proper error handling
   const handleAppleSignIn = async () => {
     setError('');
     setActiveProvider('apple');
@@ -122,19 +124,22 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
       setTimeout(handleModalClose, 400);
     } catch (e: any) {
       setIsAuthenticating(false);
+      console.error('Apple auth error:', e);
       if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
         setError('Sign-in window was closed. Please try again.');
       } else if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
         setError('Pop-up was blocked. Allow pop-ups for this site and try again.');
       } else if (e.code && (e.code.includes('configuration-not-found') || e.code.includes('admin-restricted-operation'))) {
         setError('Apple sign-in is not enabled. Enable it in Firebase Console → Authentication → Sign-in method (Apple provider requires paid Apple Developer account).');
+      } else if (e.code === 'auth/account-exists-with-different-credential') {
+        setError('An account already exists with this email. Try signing in with a different method.');
       } else {
         setError(e?.message || 'Apple sign-in failed. Please try again.');
       }
     }
   };
 
-  // 3. Real Email & Password Authentication via Firebase
+  // Email & Password Authentication
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -176,6 +181,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
       setTimeout(handleModalClose, 400);
     } catch (e: any) {
       setIsAuthenticating(false);
+      console.error('Email auth error:', e);
       if (e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found') {
         setError('Incorrect email or password.');
       } else if (e.code === 'auth/email-already-in-use') {
@@ -192,7 +198,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
     }
   };
 
-  // 4. Continue as Guest / Skip
+  // Continue as Guest
   const handleGuestAccess = () => {
     const guestUser: AegisAuthUser = {
       uid: 'guest_sentry_node',
