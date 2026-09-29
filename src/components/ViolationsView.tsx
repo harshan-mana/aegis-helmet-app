@@ -17,6 +17,8 @@ import {
   X,
   Save,
   RefreshCw,
+  Download,
+  DollarSign,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -51,7 +53,7 @@ interface UserProfile {
   guardianNotifications: boolean;
 }
 
-const VIOLATION_TYPES = [
+const DEFAULT_VIOLATION_TYPES = [
   { id: 'NO_HELMET', label: 'No Helmet', icon: AlertTriangle, color: 'text-cyber-orange', fine: 1000 },
   { id: 'TRIPLE_RIDING', label: 'Triple Riding', icon: Users, color: 'text-cyber-red', fine: 1000 },
   { id: 'FAKE_PLATE', label: 'Fake/Unregistered Plate', icon: XCircle, color: 'text-cyber-red', fine: 5000 },
@@ -77,6 +79,11 @@ export default function ViolationsView() {
   });
   const [isProfileEditing, setIsProfileEditing] = useState(false);
   const [profileDraft, setProfileDraft] = useState(profile);
+
+  // Feature 11: Custom fine amounts
+  const [violationTypes, setViolationTypes] = useState(DEFAULT_VIOLATION_TYPES);
+  const [isFineModalOpen, setIsFineModalOpen] = useState(false);
+  const [editingFine, setEditingFine] = useState<{ id: string; amount: number } | null>(null);
 
   // Guardians state
   const [guardians, setGuardians] = useState<Guardian[]>(() => {
@@ -134,7 +141,6 @@ export default function ViolationsView() {
       setIsProfileEditing(false);
     } catch (error) {
       console.warn('Profile save error:', error);
-      // Still save locally
       localStorage.setItem('aegis_user_profile', JSON.stringify(profileDraft));
       setProfile(profileDraft);
       setIsProfileEditing(false);
@@ -167,20 +173,63 @@ export default function ViolationsView() {
     setGuardians((prev) => prev.filter((g) => g.id !== id));
   };
 
-  // Simulate violation detection
+  // Feature 11: Update fine amount
+  const updateFineAmount = (typeId: string, newAmount: number) => {
+    setViolationTypes((prev) =>
+      prev.map((vt) => (vt.id === typeId ? { ...vt, fine: newAmount } : vt))
+    );
+    setIsFineModalOpen(false);
+    setEditingFine(null);
+  };
+
+  // Feature 3: Export violations as text
+  const exportViolationsAsText = () => {
+    const header = 'AEGIS AI - VIOLATION REPORT\n';
+    const separator = '='.repeat(60) + '\n';
+    const date = `Generated: ${new Date().toLocaleString()}\n\n`;
+    
+    const violationLines = violations.map((v, idx) => {
+      return `[${idx + 1}] ${v.type.replace('_', ' ')}
+    Vehicle: ${v.vehicleNumber}
+    Fine: ₹${v.penaltyAmount.toLocaleString()}
+    Status: ${v.status}
+    Confidence: ${(v.confidence * 100).toFixed(1)}%
+    Description: ${v.description}
+    Time: ${v.timestamp?.toDate ? v.timestamp.toDate().toLocaleString() : 'N/A'}
+`;
+    }).join('\n');
+
+    const footer = `\n${separator}Total Violations: ${violations.length}\nTotal Fines: ₹${violations.reduce((sum, v) => sum + v.penaltyAmount, 0).toLocaleString()}\n`;
+
+    const content = header + separator + date + separator + violationLines + footer;
+    
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `aegis_violations_${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Feature 9: Enhanced accident verification
   const simulateViolation = async () => {
     setIsSimulating(true);
-    const violationType = VIOLATION_TYPES[Math.floor(Math.random() * VIOLATION_TYPES.length)];
+    const violationType = violationTypes[Math.floor(Math.random() * violationTypes.length)];
 
     await new Promise((r) => setTimeout(r, 2000));
 
+    // Feature 9: For accidents, add detailed verification data
+    const isAccident = violationType.id === 'ACCIDENT';
     const newViolation: Omit<Violation, 'id'> = {
       type: violationType.id,
       vehicleNumber: `KA-0${Math.floor(Math.random() * 9)}-XX-${Math.floor(1000 + Math.random() * 9000)}`,
-      description: `${violationType.label} detected by YOLOv8 vision engine.`,
+      description: isAccident
+        ? `CRITICAL ACCIDENT DETECTED - Impact force: ${(Math.random() * 5 + 3).toFixed(1)}G | Location verified | Emergency services notified | GPS coordinates locked`
+        : `${violationType.label} detected by YOLOv8 vision engine.`,
       penaltyAmount: violationType.fine,
       status: 'Pending',
-      confidence: 0.85 + Math.random() * 0.14,
+      confidence: isAccident ? 0.95 + Math.random() * 0.05 : 0.85 + Math.random() * 0.14,
       timestamp: new Date().toISOString(),
     };
 
@@ -189,6 +238,15 @@ export default function ViolationsView() {
         ...newViolation,
         timestamp: serverTimestamp(),
         userId: auth.currentUser?.uid || 'guest',
+        // Feature 9: Add accident-specific fields
+        ...(isAccident && {
+          accidentDetails: {
+            impactForce: parseFloat((Math.random() * 5 + 3).toFixed(1)),
+            gpsLocked: true,
+            emergencyNotified: true,
+            verificationStatus: 'CRITICAL',
+          },
+        }),
       });
     } catch (error) {
       console.warn('Violation log error:', error);
@@ -214,7 +272,6 @@ export default function ViolationsView() {
 
     // Guardian notification if enabled
     if (profile.guardianNotifications && guardians.length > 0) {
-      // Simulate SMS notification
       console.log(`Guardian SMS sent to ${guardians.map((g) => g.phone).join(', ')}: ${violationType.label} detected`);
     }
 
@@ -240,28 +297,38 @@ export default function ViolationsView() {
             YOLOv8 Detection Engine • Real-time Monitoring
           </p>
         </div>
-        <button
-          onClick={simulateViolation}
-          disabled={isSimulating}
-          className="px-6 py-3 bg-cyber-purple text-black font-display font-black text-xs uppercase tracking-wider rounded-xl shadow-[0_0_20px_#FF8C69] hover:scale-105 active:scale-95 transition-all flex items-center gap-2 disabled:opacity-50"
-        >
-          {isSimulating ? (
-            <>
-              <RefreshCw className="w-4 h-4 animate-spin" />
-              Detecting...
-            </>
-          ) : (
-            <>
-              <Eye className="w-4 h-4" />
-              Simulate Detection
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Feature 3: Export as text button */}
+          <button
+            onClick={exportViolationsAsText}
+            className="px-4 py-3 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 hover:bg-cyber-green/20 transition-all"
+          >
+            <Download className="w-4 h-4" />
+            Export .txt
+          </button>
+          <button
+            onClick={simulateViolation}
+            disabled={isSimulating}
+            className="px-6 py-3 bg-cyber-purple text-black font-display font-black text-xs uppercase tracking-wider rounded-xl shadow-[0_0_20px_#FF8C69] hover:scale-105 active:scale-95 transition-all flex items-center gap-2 disabled:opacity-50"
+          >
+            {isSimulating ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                Detecting...
+              </>
+            ) : (
+              <>
+                <Eye className="w-4 h-4" />
+                Simulate Detection
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* VIOLATION TYPES GRID */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-        {VIOLATION_TYPES.map((vt) => {
+        {violationTypes.map((vt) => {
           const count = violations.filter((v) => v.type === vt.id).length;
           return (
             <div key={vt.id} className="glass-panel p-4 border-white/10 relative overflow-hidden group hover:border-white/20 transition-all">
@@ -270,7 +337,20 @@ export default function ViolationsView() {
                 <span className="text-[10px] font-black uppercase tracking-wider text-white/60">{vt.label}</span>
               </div>
               <p className="text-2xl font-display font-black text-white">{count}</p>
-              <p className="text-[9px] font-mono text-white/30 mt-1">Fine: ₹{vt.fine.toLocaleString()}</p>
+              <div className="flex items-center justify-between mt-1">
+                <p className="text-[9px] font-mono text-white/30">Fine: ₹{vt.fine.toLocaleString()}</p>
+                {/* Feature 11: Edit fine button */}
+                <button
+                  onClick={() => {
+                    setEditingFine({ id: vt.id, amount: vt.fine });
+                    setIsFineModalOpen(true);
+                  }}
+                  className="p-1 text-white/30 hover:text-cyber-blue transition-colors"
+                  title="Edit fine amount"
+                >
+                  <DollarSign className="w-3 h-3" />
+                </button>
+              </div>
               <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-bl from-white/5 to-transparent rounded-bl-full" />
             </div>
           );
@@ -365,7 +445,6 @@ export default function ViolationsView() {
             </div>
 
             <div className="space-y-3">
-              {/* Name */}
               <div>
                 <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">Full Name</label>
                 {isProfileEditing ? (
@@ -381,7 +460,6 @@ export default function ViolationsView() {
                 )}
               </div>
 
-              {/* Phone */}
               <div>
                 <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">Phone Number</label>
                 {isProfileEditing ? (
@@ -397,7 +475,6 @@ export default function ViolationsView() {
                 )}
               </div>
 
-              {/* License Number */}
               <div>
                 <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">License Number</label>
                 {isProfileEditing ? (
@@ -413,7 +490,6 @@ export default function ViolationsView() {
                 )}
               </div>
 
-              {/* Blood Group */}
               <div>
                 <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">Blood Group</label>
                 {isProfileEditing ? (
@@ -431,7 +507,6 @@ export default function ViolationsView() {
                 )}
               </div>
 
-              {/* Auto Report Toggle */}
               <div className="flex items-center justify-between bg-white/5 rounded-lg p-3">
                 <div>
                   <p className="text-xs font-bold text-white">Auto-Report Critical Accidents</p>
@@ -455,7 +530,6 @@ export default function ViolationsView() {
                 )}
               </div>
 
-              {/* Guardian SMS Toggle */}
               <div className="flex items-center justify-between bg-white/5 rounded-lg p-3">
                 <div>
                   <p className="text-xs font-bold text-white">Guardian SMS Notifications</p>
@@ -523,6 +597,67 @@ export default function ViolationsView() {
           </div>
         </div>
       </div>
+
+      {/* Feature 11: Edit Fine Modal */}
+      <Dialog.Root open={isFineModalOpen} onOpenChange={setIsFineModalOpen}>
+        <AnimatePresence>
+          {isFineModalOpen && editingFine && (
+            <Dialog.Portal forceMount>
+              <Dialog.Overlay asChild>
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200]"
+                />
+              </Dialog.Overlay>
+              <Dialog.Content asChild>
+                <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md p-4 z-[201]">
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    className="bg-[#121216] border border-white/10 rounded-3xl p-7 shadow-2xl"
+                  >
+                    <h2 className="text-xl font-display font-black text-white mb-6">Edit Fine Amount</h2>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-[10px] font-mono uppercase tracking-widest text-white/50 block mb-1">Violation Type</label>
+                        <p className="text-lg font-bold text-white">
+                          {violationTypes.find((vt) => vt.id === editingFine.id)?.label}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-mono uppercase tracking-widest text-white/50 block mb-1">Fine Amount (₹)</label>
+                        <input
+                          type="number"
+                          value={editingFine.amount}
+                          onChange={(e) => setEditingFine({ ...editingFine, amount: parseInt(e.target.value) || 0 })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyber-blue"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-3 mt-6">
+                      <button
+                        onClick={() => setIsFineModalOpen(false)}
+                        className="flex-1 py-3 bg-white/5 border border-white/10 text-white/60 rounded-xl text-sm font-bold hover:bg-white/10 transition-all"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => updateFineAmount(editingFine.id, editingFine.amount)}
+                        className="flex-1 py-3 bg-cyber-blue text-black rounded-xl text-sm font-black hover:scale-[1.02] transition-all"
+                      >
+                        Update Fine
+                      </button>
+                    </div>
+                  </motion.div>
+                </div>
+              </Dialog.Content>
+            </Dialog.Portal>
+          )}
+        </AnimatePresence>
+      </Dialog.Root>
 
       {/* Violation Detail Modal */}
       <Dialog.Root open={!!selectedViolation} onOpenChange={() => setSelectedViolation(null)}>
