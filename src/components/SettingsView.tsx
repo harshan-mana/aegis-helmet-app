@@ -584,7 +584,7 @@ export default function SettingsView() {
                         className="px-5 py-3 bg-cyber-green text-black font-display font-black text-xs uppercase tracking-wider rounded-xl shadow-[0_0_20px_rgba(0,255,157,0.4)] hover:scale-105 transition-all flex items-center gap-2 disabled:opacity-50"
                       >
                         <RefreshCcw className={`w-4 h-4 ${isSeeding ? 'animate-spin' : ''}`} />
-                        {isSeeding ? 'Populating...' : 'Seed Sample RTO Dataset'}
+                        {isSeeding ? 'Verifying...' : 'Seed Sample RTO Dataset'}
                       </button>
                     </div>
                   </div>
@@ -723,7 +723,7 @@ export default function SettingsView() {
               </motion.div>
             )}
 
-            {/* 3. HARDWARE & BLE MODULES */}
+            {/* 3. HARDWARE & BLE MODULES - Feature 6: Simplified, only first module */}
             {activeCategory === 'hardware' && (
               <motion.div
                 key="hardware"
@@ -774,16 +774,17 @@ export default function SettingsView() {
                     </div>
                   </div>
 
+                  {/* Feature 6: Only show first module - simplified */}
                   {wifiStatus === 'scanning' && (
                     <div className="space-y-4">
                       <div className="flex items-center gap-3 text-cyber-blue">
                         <RefreshCcw className="w-4 h-4 animate-spin" />
                         <span className="text-xs font-black tracking-wider uppercase">
-                          Searching for Bluetooth Low Energy & WiFi nodes...
+                          Verifying Bluetooth Low Energy & WiFi nodes...
                         </span>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {foundModules.map((m) => (
+                        {foundModules.filter((_, idx) => idx === 0).map((m) => (
                           <div
                             key={m.id}
                             onClick={() => confirmConnection()}
