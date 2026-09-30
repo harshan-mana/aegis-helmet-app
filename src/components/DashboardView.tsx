@@ -347,8 +347,8 @@ export default function DashboardView() {
 
   return (
     <div className="pt-24 pb-16 px-4 sm:px-8 max-w-[1700px] mx-auto space-y-6">
-      {/* TOP HUD - 4 METRICS */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* TOP HUD - 3 METRICS */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         {/* 1. Digital Speedometer with Detected Vehicles */}
         <div className="glass-panel p-5 border-cyber-blue/20 relative overflow-hidden">
           <div className="flex items-center gap-2 mb-3">
@@ -479,53 +479,6 @@ export default function DashboardView() {
           )}
         </div>
 
-        {/* 4. Emergency Contacts */}
-        <div className="glass-panel p-5 border-cyber-red/20 relative overflow-hidden">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Phone className="w-5 h-5 text-cyber-red" />
-              <span className="text-[10px] font-black uppercase tracking-widest text-white/40">Emergency Contacts</span>
-            </div>
-            <button
-              onClick={() => setIsAddContactOpen(true)}
-              className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5 text-white/60" />
-            </button>
-          </div>
-          <div className="space-y-1.5 max-h-[120px] overflow-y-auto">
-            {DEFAULT_EMERGENCY_CONTACTS.map((contact) => {
-              const Icon = getContactIcon(contact.type);
-              return (
-                <div key={contact.id} className="flex items-center justify-between bg-white/5 rounded-lg px-2.5 py-1.5">
-                  <div className="flex items-center gap-2">
-                    <Icon className="w-3.5 h-3.5 text-white/50" />
-                    <span className="text-[10px] font-bold text-white/70">{contact.name}</span>
-                  </div>
-                  <a href={`tel:${contact.phone}`} className="text-[10px] font-mono text-cyber-blue hover:underline">
-                    {contact.phone}
-                  </a>
-                </div>
-              );
-            })}
-            {savedContacts.map((contact) => (
-              <div key={contact.id} className="flex items-center justify-between bg-white/5 rounded-lg px-2.5 py-1.5">
-                <div className="flex items-center gap-2">
-                  <User className="w-3.5 h-3.5 text-white/50" />
-                  <span className="text-[10px] font-bold text-white/70">{contact.name}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <a href={`tel:${contact.phone}`} className="text-[10px] font-mono text-cyber-blue hover:underline">
-                    {contact.phone}
-                  </a>
-                  <button onClick={() => removeContact(contact.id)} className="text-white/20 hover:text-cyber-red">
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* MAIN CONTENT: WEBCAM + DETECTION + TRACKING */}
@@ -735,11 +688,20 @@ export default function DashboardView() {
 
         {/* RIGHT COLUMN: Quick Actions & Status */}
         <div className="space-y-4">
-          {/* Quick SOS */}
+          {/* Quick SOS with Add Contact */}
           <div className="glass-panel p-5 border-cyber-red/30 bg-cyber-red/5 space-y-3">
-            <h3 className="text-xs font-black uppercase tracking-widest text-cyber-red flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4" /> Emergency SOS
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-black uppercase tracking-widest text-cyber-red flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4" /> Emergency SOS
+              </h3>
+              <button
+                onClick={() => setIsAddContactOpen(true)}
+                className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+                title="Add Emergency Contact"
+              >
+                <Plus className="w-3.5 h-3.5 text-white/60" />
+              </button>
+            </div>
             <div className="space-y-2">
               <a
                 href="tel:100"
@@ -759,6 +721,23 @@ export default function DashboardView() {
               >
                 <Phone className="w-4 h-4" /> Emergency: 112
               </a>
+              {/* Custom saved contacts */}
+              {savedContacts.map((contact) => (
+                <div key={contact.id} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <Phone className="w-3.5 h-3.5 text-white/50" />
+                    <span className="text-xs font-bold text-white">{contact.name}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <a href={`tel:${contact.phone}`} className="text-xs font-mono text-cyber-blue hover:underline">
+                      {contact.phone}
+                    </a>
+                    <button onClick={() => removeContact(contact.id)} className="text-white/20 hover:text-cyber-red">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
