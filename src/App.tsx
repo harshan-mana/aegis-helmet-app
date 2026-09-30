@@ -3,7 +3,7 @@ import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, ShieldAlert, User, Phone, Save, X, Zap, Settings } from 'lucide-react';
+import { Shield, ShieldAlert, User, Phone, Save, X, Zap, Settings, LogOut, ChevronDown, Palette, Moon, Sun, Sparkles } from 'lucide-react';
 import AegisNavbar from './components/AegisNavbar';
 import AuthorityView from './components/AuthorityView';
 import SettingsView from './components/SettingsView';
@@ -12,6 +12,13 @@ import ViolationsView from './components/ViolationsView';
 import AuthModal from './components/AuthModal';
 import ServiceProviderLogin from './components/ServiceProviderLogin';
 import { AegisAuthUser, LOCAL_AUTH_STORAGE_KEY } from './types/auth';
+
+const THEMES = [
+  { id: 'cyber', name: 'Cyber Night', icon: Moon, bg: 'bg-[#14100D]', accent: 'cyber-blue' },
+  { id: 'sunset', name: 'Sunset Glow', icon: Sun, bg: 'bg-[#1a0a0a]', accent: 'cyber-orange' },
+  { id: 'aurora', name: 'Aurora', icon: Sparkles, bg: 'bg-[#0a0a1a]', accent: 'cyber-purple' },
+  { id: 'ocean', name: 'Ocean', icon: Palette, bg: 'bg-[#0a1a1a]', accent: 'cyber-green' },
+];
 
 export default function App() {
   const [user, setUser] = useState(auth.currentUser);
@@ -37,14 +44,30 @@ export default function App() {
   });
   const [currentView, setCurrentView] = useState<'dashboard' | 'violations' | 'authority' | 'profile' | 'settings'>('dashboard');
   const [loading, setLoading] = useState(true);
+  const [showSplash, setShowSplash] = useState(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isServiceProviderOpen, setIsServiceProviderOpen] = useState(false);
   const [showProfilePrompt, setShowProfilePrompt] = useState(false);
   const [profileData, setProfileData] = useState({ name: '', phone: '', guardianName: '', guardianPhone: '' });
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showThemeMenu, setShowThemeMenu] = useState(false);
+  const [currentTheme, setCurrentTheme] = useState(() => {
+    return localStorage.getItem('aegis_theme') || 'cyber';
+  });
 
   const effectiveUser = user || localUser;
 
-  // Check if profile is complete
+  // Splash screen timer
+  useEffect(() => {
+    const timer = setTimeout(() => setShowSplash(false), 2500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Apply theme
+  useEffect(() => {
+    localStorage.setItem('aegis_theme', currentTheme);
+  }, [currentTheme]);
+
   const isProfileComplete = () => {
     const saved = localStorage.getItem('aegis_user_profile');
     if (saved) {
@@ -66,7 +89,6 @@ export default function App() {
           if (snapshot.exists()) {
             const data = snapshot.data();
             setUserRole(data.role || 'Driver');
-            // Only show profile prompt if profile is incomplete and not already shown
             if (!data.phone || !data.emergencyContact1?.phone) {
               setShowProfilePrompt(true);
             }
@@ -84,7 +106,6 @@ export default function App() {
           setShowProfilePrompt(false);
         } else {
           setUserRole(localUser.role || 'Driver');
-          // Check guest profile
           if (!isProfileComplete()) {
             setShowProfilePrompt(true);
           }
@@ -122,7 +143,6 @@ export default function App() {
       console.warn('LocalStorage error:', e);
     }
     handleAuthSuccess(guest);
-    // Show profile prompt for guests (non-blocking)
     if (!isProfileComplete()) {
       setShowProfilePrompt(true);
     }
@@ -140,6 +160,7 @@ export default function App() {
     setUser(null);
     setUserRole(null);
     setShowProfilePrompt(false);
+    setShowUserMenu(false);
     try {
       await auth.signOut();
     } catch (e) {
@@ -170,25 +191,16 @@ export default function App() {
     }
   };
 
-  // Simple profile save - like Google
   const saveProfile = async () => {
     if (!effectiveUser) return;
-
     const profileDataToSave = {
       name: profileData.name,
       phone: profileData.phone,
-      emergencyContact1: {
-        name: profileData.guardianName,
-        phone: profileData.guardianPhone
-      },
+      emergencyContact1: { name: profileData.guardianName, phone: profileData.guardianPhone },
       autoReport: true,
       guardianNotifications: true,
     };
-
-    // Save to localStorage
     localStorage.setItem('aegis_user_profile', JSON.stringify(profileDataToSave));
-
-    // Save to Firestore for authenticated users
     if (user) {
       try {
         await updateDoc(doc(db, 'users', user.uid), profileDataToSave);
@@ -196,76 +208,80 @@ export default function App() {
         handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
       }
     }
-
     setShowProfilePrompt(false);
     setProfileData({ name: '', phone: '', guardianName: '', guardianPhone: '' });
   };
 
-  const skipProfile = () => {
-    setShowProfilePrompt(false);
-  };
+  const skipProfile = () => setShowProfilePrompt(false);
+
+  const theme = THEMES.find(t => t.id === currentTheme) || THEMES[0];
+
+  // Splash Screen
+  if (showSplash) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-[#0a0a0f] relative overflow-hidden">
+        <div className="absolute inset-0 cyber-grid opacity-30" />
+        <motion.div
+          initial={{ opacity: 0, scale: 0.5 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+          className="relative z-10 flex flex-col items-center"
+        >
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+            className="absolute -inset-12 border-2 border-dashed border-cyber-blue/30 rounded-full"
+          />
+          <motion.div
+            animate={{ rotate: -360 }}
+            transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+            className="absolute -inset-20 border border-cyber-orange/20 rounded-full"
+          />
+          <div className="p-10 bg-gradient-to-br from-cyber-blue/20 to-cyber-purple/20 rounded-full backdrop-blur-3xl border border-cyber-blue/30 relative overflow-hidden">
+            <Shield className="w-20 h-20 text-cyber-blue" />
+            <div className="absolute inset-0 bg-gradient-to-tr from-cyber-blue/30 to-transparent pointer-events-none" />
+          </div>
+          <motion.h1
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="text-4xl font-display font-black tracking-[0.3em] text-white uppercase mt-8 neon-text-blue"
+          >
+            AEGIS AI
+          </motion.h1>
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.6 }}
+            className="text-xs font-mono text-cyber-blue/60 uppercase tracking-widest mt-2"
+          >
+            Smart Traffic Safety System
+          </motion.p>
+          <motion.div
+            initial={{ width: 0 }}
+            animate={{ width: 200 }}
+            transition={{ delay: 0.8, duration: 1.2, ease: "easeInOut" }}
+            className="h-1 bg-gradient-to-r from-cyber-blue to-cyber-purple rounded-full mt-6"
+          />
+        </motion.div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center bg-[#14100D] relative overflow-hidden">
-        <div className="absolute inset-0 cyber-grid opacity-20" />
+      <div className="h-screen w-screen flex items-center justify-center bg-[#0a0a0f]">
         <motion.div
-           initial={{ opacity: 0, scale: 0.8 }}
-           animate={{ opacity: 1, scale: 1 }}
-           className="relative z-10 flex flex-col items-center"
-        >
-          <div className="relative mb-12">
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-              className="absolute -inset-8 border-2 border-dashed border-cyber-blue/20 rounded-full"
-            />
-            <motion.div
-              animate={{ rotate: -360 }}
-              transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
-              className="absolute -inset-12 border border-cyber-orange/10 rounded-full"
-            />
-            <div className="p-8 bg-cyber-blue/10 rounded-full backdrop-blur-3xl border border-cyber-blue/30 relative overflow-hidden group">
-              <Shield className="w-16 h-16 text-cyber-blue animate-pulse" />
-              <div className="absolute inset-0 bg-gradient-to-tr from-cyber-blue/20 to-transparent pointer-events-none" />
-            </div>
-          </div>
-          <div className="space-y-4 text-center">
-            <h1 className="text-2xl font-display font-black tracking-[0.3em] text-white uppercase neon-text-blue">
-              AEGIS AI
-            </h1>
-            <div className="flex flex-col items-center gap-2">
-              <motion.p
-                initial={{ opacity: 0 }}
-                animate={{ opacity: [0, 1, 0.5, 1] }}
-                transition={{ duration: 2, repeat: Infinity }}
-                className="text-[10px] font-mono text-cyber-blue/60 uppercase tracking-widest"
-              >
-                Initializing Safety Grid Protocol...
-              </motion.p>
-              <div className="w-48 h-1 bg-white/5 rounded-full overflow-hidden relative border border-white/5">
-                <motion.div
-                  initial={{ x: '-100%' }}
-                  animate={{ x: '100%' }}
-                  transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute inset-0 w-full bg-cyber-blue shadow-[0_0_10px_#FF6B35]"
-                />
-              </div>
-            </div>
-          </div>
-        </motion.div>
-        <div className="absolute bottom-12 left-12 font-mono text-[8px] text-white/20 uppercase space-y-1">
-          <p>System: Online</p>
-          <p>Auth Layer: Verifying</p>
-          <p>Neural Engine: Warm</p>
-          <p>Region: AIS-SEA-GCP-NODE-32</p>
-        </div>
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+          className="w-8 h-8 border-2 border-cyber-blue border-t-transparent rounded-full"
+        />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#14100D]">
+    <div className={`min-h-screen ${theme.bg} transition-colors duration-500`}>
       <AegisNavbar
         userRole={userRole}
         onViewChange={setCurrentView}
@@ -274,6 +290,13 @@ export default function App() {
         onServiceProviderLogin={() => setIsServiceProviderOpen(true)}
         userName={effectiveUser?.displayName || undefined}
         userPhoto={effectiveUser?.photoURL || undefined}
+        showUserMenu={showUserMenu}
+        setShowUserMenu={setShowUserMenu}
+        showThemeMenu={showThemeMenu}
+        setShowThemeMenu={setShowThemeMenu}
+        currentTheme={currentTheme}
+        setCurrentTheme={setCurrentTheme}
+        onSwitchAccount={() => { handleSignOut(); setIsAuthModalOpen(true); }}
       />
 
       <main>
@@ -314,13 +337,21 @@ export default function App() {
                   Continue as Guest
                 </button>
               </div>
-              <div className="mt-8">
+              <div className="mt-8 flex items-center justify-center gap-4">
                 <button
                   onClick={() => setIsServiceProviderOpen(true)}
-                  className="text-white/40 hover:text-white/70 text-xs font-mono uppercase tracking-widest transition-colors flex items-center gap-2 mx-auto"
+                  className="text-white/40 hover:text-white/70 text-xs font-mono uppercase tracking-widest transition-colors flex items-center gap-2"
                 >
                   <Settings className="w-3.5 h-3.5" />
-                  Service Provider Login
+                  Service Provider
+                </button>
+                <span className="text-white/20">|</span>
+                <button
+                  onClick={() => setShowThemeMenu(!showThemeMenu)}
+                  className="text-white/40 hover:text-white/70 text-xs font-mono uppercase tracking-widest transition-colors flex items-center gap-2"
+                >
+                  <Palette className="w-3.5 h-3.5" />
+                  Theme
                 </button>
               </div>
             </div>
@@ -355,7 +386,7 @@ export default function App() {
         onClose={() => setIsServiceProviderOpen(false)}
       />
 
-      {/* Simple Profile Prompt - Non-blocking, like Google */}
+      {/* Simple Profile Prompt - Non-blocking */}
       <AnimatePresence>
         {showProfilePrompt && effectiveUser && (
           <motion.div
@@ -419,10 +450,7 @@ export default function App() {
                     </button>
                   </div>
                 </div>
-                <button
-                  onClick={skipProfile}
-                  className="p-1 text-white/30 hover:text-white shrink-0"
-                >
+                <button onClick={skipProfile} className="p-1 text-white/30 hover:text-white shrink-0">
                   <X className="w-4 h-4" />
                 </button>
               </div>
