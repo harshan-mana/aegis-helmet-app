@@ -305,6 +305,8 @@ export default function App() {
         currentView={currentView}
         onSignOut={handleSignOut}
         onServiceProviderLogin={() => setIsServiceProviderOpen(true)}
+        userName={effectiveUser?.displayName || undefined}
+        userPhoto={effectiveUser?.photoURL || undefined}
       />
       
       <main>
