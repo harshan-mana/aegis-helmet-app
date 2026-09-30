@@ -35,22 +35,24 @@ export default function App() {
       return null;
     }
   });
-  // Feature 2: Dashboard is now the default view, AI Sentry HUD removed
   const [currentView, setCurrentView] = useState<'dashboard' | 'violations' | 'authority' | 'profile' | 'settings'>('dashboard');
   const [loading, setLoading] = useState(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isServiceProviderOpen, setIsServiceProviderOpen] = useState(false);
-  const [needsProfile, setNeedsProfile] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const [onboardingErrors, setOnboardingErrors] = useState<{[key: string]: string}>({});
-  const [onboardingData, setOnboardingData] = useState({
-    name: '',
-    phone: '',
-    guardianName: '',
-    guardianPhone: ''
-  });
+  const [showProfilePrompt, setShowProfilePrompt] = useState(false);
+  const [profileData, setProfileData] = useState({ name: '', phone: '', guardianName: '', guardianPhone: '' });
 
   const effectiveUser = user || localUser;
+
+  // Check if profile is complete
+  const isProfileComplete = () => {
+    const saved = localStorage.getItem('aegis_user_profile');
+    if (saved) {
+      const profile = JSON.parse(saved);
+      return profile.name && profile.phone && profile.emergencyContact1?.name && profile.emergencyContact1?.phone;
+    }
+    return false;
+  };
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
@@ -64,12 +66,9 @@ export default function App() {
           if (snapshot.exists()) {
             const data = snapshot.data();
             setUserRole(data.role || 'Driver');
-            
-            const isMissingInfo = !data.phone || !data.emergencyContact1?.phone || data.phone === '' || data.emergencyContact1?.phone === '';
-            setNeedsProfile(isMissingInfo);
-            
-            if (isMissingInfo && !showOnboarding) {
-              setShowOnboarding(true);
+            // Only show profile prompt if profile is incomplete and not already shown
+            if (!data.phone || !data.emergencyContact1?.phone) {
+              setShowProfilePrompt(true);
             }
           } else {
             handleNewUser(u.uid, u.email || '');
@@ -82,10 +81,13 @@ export default function App() {
       } else {
         if (!localUser) {
           setUserRole(null);
-          setNeedsProfile(false);
-          setShowOnboarding(false);
+          setShowProfilePrompt(false);
         } else {
           setUserRole(localUser.role || 'Driver');
+          // Check guest profile
+          if (!isProfileComplete()) {
+            setShowProfilePrompt(true);
+          }
         }
         setLoading(false);
       }
@@ -100,7 +102,6 @@ export default function App() {
   const handleAuthSuccess = (authUser: AegisAuthUser) => {
     setLocalUser(authUser);
     setUserRole(authUser.role || 'Driver');
-    // Don't set needsProfile to false here - let the snapshot listener determine this
     setCurrentView('dashboard');
     setIsAuthModalOpen(false);
   };
@@ -121,19 +122,9 @@ export default function App() {
       console.warn('LocalStorage error:', e);
     }
     handleAuthSuccess(guest);
-    // For guest users, check if profile is incomplete and show onboarding
-    const savedProfile = localStorage.getItem('aegis_user_profile');
-    if (savedProfile) {
-      const profile = JSON.parse(savedProfile);
-      const isMissingInfo = !profile.phone || !profile.emergencyContact1?.phone;
-      if (isMissingInfo) {
-        setNeedsProfile(true);
-        setShowOnboarding(true);
-      }
-    } else {
-      // No profile saved yet - show onboarding
-      setNeedsProfile(true);
-      setShowOnboarding(true);
+    // Show profile prompt for guests (non-blocking)
+    if (!isProfileComplete()) {
+      setShowProfilePrompt(true);
     }
   };
 
@@ -148,6 +139,7 @@ export default function App() {
     setLocalUser(null);
     setUser(null);
     setUserRole(null);
+    setShowProfilePrompt(false);
     try {
       await auth.signOut();
     } catch (e) {
@@ -171,81 +163,52 @@ export default function App() {
         guardianNotifications: false
       });
       setUserRole(defaultRole);
-      setNeedsProfile(true);
-      setShowOnboarding(true);
-      setCurrentView('settings');
+      setShowProfilePrompt(true);
+      setCurrentView('dashboard');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${uid}`);
     }
   };
 
-  const submitOnboarding = async () => {
-    // Use localUser directly to avoid stale closure issues
-    const currentUser = user || localUser;
-    if (!currentUser) {
-      console.warn('No user available for onboarding');
-      return;
-    }
+  // Simple profile save - like Google
+  const saveProfile = async () => {
+    if (!effectiveUser) return;
 
-    const nameRegex = /^[a-zA-Z\s]+$/;
-    const phoneRegex = /^\d{10,15}$/;
-    const newErrors: {[key: string]: string} = {};
-
-    if (!onboardingData.name || !nameRegex.test(onboardingData.name)) {
-      newErrors.name = "Full Name must contain letters and spaces only.";
-    }
-    if (!onboardingData.phone || !phoneRegex.test(onboardingData.phone)) {
-      newErrors.phone = "Mobile Number must be 10-15 digits only.";
-    }
-    if (!onboardingData.guardianName || !nameRegex.test(onboardingData.guardianName)) {
-      newErrors.guardianName = "Guardian Name must contain letters only.";
-    }
-    if (!onboardingData.guardianPhone || !phoneRegex.test(onboardingData.guardianPhone)) {
-      newErrors.guardianPhone = "Guardian Contact must be 10-15 digits only.";
-    }
-
-    if (Object.keys(newErrors).length > 0) {
-      setOnboardingErrors(newErrors);
-      return;
-    }
-
-    // Save to localStorage for all users (including guests)
-    const profileData = {
-      name: onboardingData.name,
-      phone: onboardingData.phone,
+    const profileDataToSave = {
+      name: profileData.name,
+      phone: profileData.phone,
       emergencyContact1: {
-        name: onboardingData.guardianName,
-        phone: onboardingData.guardianPhone
+        name: profileData.guardianName,
+        phone: profileData.guardianPhone
       },
       autoReport: true,
       guardianNotifications: true,
     };
-    localStorage.setItem('aegis_user_profile', JSON.stringify(profileData));
 
-    // Also save to Firestore for authenticated users
+    // Save to localStorage
+    localStorage.setItem('aegis_user_profile', JSON.stringify(profileDataToSave));
+
+    // Save to Firestore for authenticated users
     if (user) {
       try {
-        await updateDoc(doc(db, 'users', user.uid), {
-          name: onboardingData.name,
-          phone: onboardingData.phone,
-          emergencyContact1: {
-            name: onboardingData.guardianName,
-            phone: onboardingData.guardianPhone
-          }
-        });
+        await updateDoc(doc(db, 'users', user.uid), profileDataToSave);
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
       }
     }
-    setShowOnboarding(false);
-    setNeedsProfile(false);
+
+    setShowProfilePrompt(false);
+    setProfileData({ name: '', phone: '', guardianName: '', guardianPhone: '' });
+  };
+
+  const skipProfile = () => {
+    setShowProfilePrompt(false);
   };
 
   if (loading) {
     return (
       <div className="h-screen w-screen flex flex-col items-center justify-center bg-[#14100D] relative overflow-hidden">
         <div className="absolute inset-0 cyber-grid opacity-20" />
-        
         <motion.div
            initial={{ opacity: 0, scale: 0.8 }}
            animate={{ opacity: 1, scale: 1 }}
@@ -267,13 +230,12 @@ export default function App() {
               <div className="absolute inset-0 bg-gradient-to-tr from-cyber-blue/20 to-transparent pointer-events-none" />
             </div>
           </div>
-
           <div className="space-y-4 text-center">
             <h1 className="text-2xl font-display font-black tracking-[0.3em] text-white uppercase neon-text-blue">
               AEGIS AI
             </h1>
             <div className="flex flex-col items-center gap-2">
-              <motion.p 
+              <motion.p
                 initial={{ opacity: 0 }}
                 animate={{ opacity: [0, 1, 0.5, 1] }}
                 transition={{ duration: 2, repeat: Infinity }}
@@ -282,7 +244,7 @@ export default function App() {
                 Initializing Safety Grid Protocol...
               </motion.p>
               <div className="w-48 h-1 bg-white/5 rounded-full overflow-hidden relative border border-white/5">
-                <motion.div 
+                <motion.div
                   initial={{ x: '-100%' }}
                   animate={{ x: '100%' }}
                   transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
@@ -292,7 +254,6 @@ export default function App() {
             </div>
           </div>
         </motion.div>
-
         <div className="absolute bottom-12 left-12 font-mono text-[8px] text-white/20 uppercase space-y-1">
           <p>System: Online</p>
           <p>Auth Layer: Verifying</p>
@@ -305,68 +266,64 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#14100D]">
-      <AegisNavbar 
-        userRole={userRole} 
-        onViewChange={setCurrentView} 
+      <AegisNavbar
+        userRole={userRole}
+        onViewChange={setCurrentView}
         currentView={currentView}
         onSignOut={handleSignOut}
         onServiceProviderLogin={() => setIsServiceProviderOpen(true)}
         userName={effectiveUser?.displayName || undefined}
         userPhoto={effectiveUser?.photoURL || undefined}
       />
-      
+
       <main>
         {!effectiveUser ? (
           <div className="min-h-screen flex items-center justify-center px-4 py-20 relative">
-             <div className="absolute inset-0 z-0 opacity-10 pointer-events-none overflow-hidden">
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-brand-primary rounded-full blur-[200px]" />
-             </div>
-             
-             <div className="max-w-2xl text-center z-10">
-               <motion.div 
-                 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                 className="flex justify-center mb-8"
-               >
-                 <div className="p-4 bg-brand-primary rounded-3xl shadow-2xl shadow-brand-primary/20">
-                   <ShieldAlert className="w-16 h-16 text-white" />
-                 </div>
-               </motion.div>
-               <h1 className="text-5xl sm:text-7xl font-display font-bold tracking-tighter mb-6 leading-none">
-                 AI TRAFFIC <br /> <span className="text-brand-primary">SAFETY</span> FOR ALL
-               </h1>
-               <p className="text-white/40 text-lg mb-10 max-w-md mx-auto leading-relaxed">
-                 Integrating real-time image recognition with RTO databases to prevent accidents and enforce safety standards.
-               </p>
-               
-               <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                 <button 
-                   id="btn-get-started"
-                   onClick={() => setIsAuthModalOpen(true)}
-                   className="w-full sm:w-auto px-10 py-4 bg-white text-black text-sm font-bold uppercase tracking-widest rounded-full hover:scale-105 active:scale-95 transition-all shadow-xl shadow-white/10"
-                 >
-                   Get Started
-                 </button>
-                 <button 
-                   id="btn-hero-continue-as-guest"
-                   onClick={handleGuestLogin}
-                   className="w-full sm:w-auto px-8 py-4 bg-cyber-blue/15 border border-cyber-blue/40 text-cyber-blue text-sm font-black uppercase tracking-widest rounded-full hover:bg-cyber-blue hover:text-black hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg shadow-cyber-blue/10"
-                 >
-                   <Zap className="w-4 h-4" />
-                   Continue as Guest
-                 </button>
-               </div>
-
-               {/* Feature 11: Service Provider Login */}
-               <div className="mt-8">
-                 <button
-                   onClick={() => setIsServiceProviderOpen(true)}
-                   className="text-white/40 hover:text-white/70 text-xs font-mono uppercase tracking-widest transition-colors flex items-center gap-2 mx-auto"
-                 >
-                   <Settings className="w-3.5 h-3.5" />
-                   Service Provider Login
-                 </button>
-               </div>
-             </div>
+            <div className="absolute inset-0 z-0 opacity-10 pointer-events-none overflow-hidden">
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-brand-primary rounded-full blur-[200px]" />
+            </div>
+            <div className="max-w-2xl text-center z-10">
+              <motion.div
+                initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                className="flex justify-center mb-8"
+              >
+                <div className="p-4 bg-brand-primary rounded-3xl shadow-2xl shadow-brand-primary/20">
+                  <ShieldAlert className="w-16 h-16 text-white" />
+                </div>
+              </motion.div>
+              <h1 className="text-5xl sm:text-7xl font-display font-bold tracking-tighter mb-6 leading-none">
+                AI TRAFFIC <br /> <span className="text-brand-primary">SAFETY</span> FOR ALL
+              </h1>
+              <p className="text-white/40 text-lg mb-10 max-w-md mx-auto leading-relaxed">
+                Integrating real-time image recognition with RTO databases to prevent accidents and enforce safety standards.
+              </p>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                <button
+                  id="btn-get-started"
+                  onClick={() => setIsAuthModalOpen(true)}
+                  className="w-full sm:w-auto px-10 py-4 bg-white text-black text-sm font-bold uppercase tracking-widest rounded-full hover:scale-105 active:scale-95 transition-all shadow-xl shadow-white/10"
+                >
+                  Get Started
+                </button>
+                <button
+                  id="btn-hero-continue-as-guest"
+                  onClick={handleGuestLogin}
+                  className="w-full sm:w-auto px-8 py-4 bg-cyber-blue/15 border border-cyber-blue/40 text-cyber-blue text-sm font-black uppercase tracking-widest rounded-full hover:bg-cyber-blue hover:text-black hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg shadow-cyber-blue/10"
+                >
+                  <Zap className="w-4 h-4" />
+                  Continue as Guest
+                </button>
+              </div>
+              <div className="mt-8">
+                <button
+                  onClick={() => setIsServiceProviderOpen(true)}
+                  className="text-white/40 hover:text-white/70 text-xs font-mono uppercase tracking-widest transition-colors flex items-center gap-2 mx-auto"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                  Service Provider Login
+                </button>
+              </div>
+            </div>
           </div>
         ) : (
           <AnimatePresence mode="wait">
@@ -387,135 +344,93 @@ export default function App() {
         )}
       </main>
 
-      <AuthModal 
-        isOpen={isAuthModalOpen} 
+      <AuthModal
+        isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         onLogin={handleAuthSuccess}
       />
 
-      {/* Feature 11: Service Provider Login Modal */}
       <ServiceProviderLogin
         isOpen={isServiceProviderOpen}
         onClose={() => setIsServiceProviderOpen(false)}
       />
 
-      {/* Mandatory Onboarding Modal */}
+      {/* Simple Profile Prompt - Non-blocking, like Google */}
       <AnimatePresence>
-        {showOnboarding && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+        {showProfilePrompt && effectiveUser && (
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] w-[95%] max-w-md"
           >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              className="glass-panel w-full max-w-md p-8 relative overflow-hidden"
-            >
-              <div className="absolute top-0 left-0 w-full h-1 bg-brand-primary" />
-              
-              <div className="flex items-center gap-4 mb-6">
-                <div className="p-3 bg-brand-primary/10 rounded-2xl">
-                  <User className="w-6 h-6 text-brand-primary" />
+            <div className="glass-panel p-5 border-white/10 shadow-2xl">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-cyber-blue/10 rounded-xl shrink-0">
+                  <User className="w-5 h-5 text-cyber-blue" />
                 </div>
-                <div>
-                  <h2 className="text-xl font-black uppercase tracking-tighter">Profile Activation</h2>
-                  <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest">Verify identity & Safety links</p>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-white/40 uppercase">Your Full Name <span className="text-red-500">*</span></label>
-                  <input 
-                    type="text"
-                    placeholder="Enter name (Letters only)"
-                    value={onboardingData.name}
-                    onChange={e => {
-                      setOnboardingData({...onboardingData, name: e.target.value});
-                      if (onboardingErrors.name) {
-                        const next = {...onboardingErrors};
-                        delete next.name;
-                        setOnboardingErrors(next);
-                      }
-                    }}
-                    className={`w-full bg-white/5 border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-brand-primary transition-colors ${onboardingErrors.name ? 'border-red-500 bg-red-500/5' : 'border-white/10'}`}
-                  />
-                  {onboardingErrors.name && <p className="text-[9px] text-red-500 font-bold uppercase">{onboardingErrors.name}</p>}
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-white/40 uppercase">Your Mobile Number <span className="text-red-500">*</span></label>
-                  <input 
-                    type="tel"
-                    placeholder="10-15 digits only"
-                    value={onboardingData.phone}
-                    onChange={e => {
-                      setOnboardingData({...onboardingData, phone: e.target.value});
-                       if (onboardingErrors.phone) {
-                        const next = {...onboardingErrors};
-                        delete next.phone;
-                        setOnboardingErrors(next);
-                      }
-                    }}
-                    className={`w-full bg-white/5 border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-brand-primary transition-colors ${onboardingErrors.phone ? 'border-red-500 bg-red-500/5' : 'border-white/10'}`}
-                  />
-                  {onboardingErrors.phone && <p className="text-[9px] text-red-500 font-bold uppercase">{onboardingErrors.phone}</p>}
-                </div>
-                <div className="space-y-1 p-4 bg-brand-primary/5 rounded-2xl border border-brand-primary/10">
-                  <p className="text-[10px] font-black text-brand-primary uppercase mb-3 flex items-center gap-2">
-                    <ShieldAlert className="w-3 h-3" /> Guardian Information
-                  </p>
-                  <div className="space-y-3">
-                    <div>
-                      <input 
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-sm font-black text-white mb-1">Complete Your Profile</h3>
+                  <p className="text-[10px] text-white/50 mb-3">Add your details for emergency features</p>
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      placeholder="Full Name"
+                      value={profileData.name}
+                      onChange={(e) => setProfileData({ ...profileData, name: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyber-blue"
+                    />
+                    <input
+                      type="tel"
+                      placeholder="Phone Number"
+                      value={profileData.phone}
+                      onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyber-blue"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
                         type="text"
                         placeholder="Guardian Name"
-                        value={onboardingData.guardianName}
-                        onChange={e => {
-                          setOnboardingData({...onboardingData, guardianName: e.target.value});
-                          if (onboardingErrors.guardianName) {
-                            const next = {...onboardingErrors};
-                            delete next.guardianName;
-                            setOnboardingErrors(next);
-                          }
-                        }}
-                        className={`w-full bg-white/5 border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-brand-primary transition-colors ${onboardingErrors.guardianName ? 'border-red-500 bg-red-500/5' : 'border-white/10'}`}
+                        value={profileData.guardianName}
+                        onChange={(e) => setProfileData({ ...profileData, guardianName: e.target.value })}
+                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyber-blue"
                       />
-                      {onboardingErrors.guardianName && <p className="text-[8px] text-red-500 font-bold uppercase mt-1">{onboardingErrors.guardianName}</p>}
-                    </div>
-                    <div>
-                      <input 
+                      <input
                         type="tel"
                         placeholder="Guardian Phone"
-                        value={onboardingData.guardianPhone}
-                        onChange={e => {
-                          setOnboardingData({...onboardingData, guardianPhone: e.target.value});
-                          if (onboardingErrors.guardianPhone) {
-                            const next = {...onboardingErrors};
-                            delete next.guardianPhone;
-                            setOnboardingErrors(next);
-                          }
-                        }}
-                        className={`w-full bg-white/5 border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-brand-primary transition-colors ${onboardingErrors.guardianPhone ? 'border-red-500 bg-red-500/5' : 'border-white/10'}`}
+                        value={profileData.guardianPhone}
+                        onChange={(e) => setProfileData({ ...profileData, guardianPhone: e.target.value })}
+                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyber-blue"
                       />
-                      {onboardingErrors.guardianPhone && <p className="text-[8px] text-red-500 font-bold uppercase mt-1">{onboardingErrors.guardianPhone}</p>}
                     </div>
                   </div>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={skipProfile}
+                      className="flex-1 py-2 bg-white/5 border border-white/10 text-white/60 rounded-lg text-xs font-bold hover:bg-white/10 transition-all"
+                    >
+                      Skip
+                    </button>
+                    <button
+                      onClick={saveProfile}
+                      className="flex-1 py-2 bg-cyber-blue text-black rounded-lg text-xs font-black hover:scale-[1.02] transition-all"
+                    >
+                      Save
+                    </button>
+                  </div>
                 </div>
+                <button
+                  onClick={skipProfile}
+                  className="p-1 text-white/30 hover:text-white shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-
-              <button 
-                onClick={submitOnboarding}
-                className="w-full py-4 mt-8 bg-brand-primary text-white rounded-xl font-black uppercase tracking-widest text-xs hover:bg-brand-primary/90 transition-all shadow-xl shadow-brand-primary/20 active:scale-95"
-              >
-                Save & Proceed
-              </button>
-            </motion.div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
-      
+
       {/* Background Ambience */}
       <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden">
         <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-brand-primary/5 rounded-full blur-[120px]" />
