@@ -10,9 +10,11 @@ interface AegisNavbarProps {
   currentView: string;
   onSignOut?: () => void;
   onServiceProviderLogin?: () => void;
+  userName?: string;
+  userPhoto?: string;
 }
 
-export default function AegisNavbar({ userRole, onViewChange, currentView, onSignOut, onServiceProviderLogin }: AegisNavbarProps) {
+export default function AegisNavbar({ userRole, onViewChange, currentView, onSignOut, onServiceProviderLogin, userName, userPhoto }: AegisNavbarProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [profileIncomplete, setProfileIncomplete] = useState(false);
 
@@ -28,7 +30,6 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
     });
   }, []);
 
-  // Feature 2: Removed AI Sentry HUD, kept Dashboard, Violations, Authority, Settings
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: Gauge },
     { id: 'violations', label: 'Violations', icon: AlertTriangle },
@@ -39,7 +40,6 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
   return (
     <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-[80] w-[95%] max-w-5xl">
       <div className="glass-panel px-6 py-3.5 border-white/10 flex items-center justify-between relative overflow-hidden group shadow-[0_0_40px_rgba(0,0,0,0.8)]">
-        {/* Animated Background Scan Line */}
         <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-20">
           <motion.div
             animate={{ x: ['-100%', '200%'] }}
@@ -84,6 +84,22 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
         </div>
 
         <div className="flex items-center gap-3 relative z-10">
+          {/* User Profile Avatar with Name */}
+          {userName && (
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-xl">
+              {userPhoto ? (
+                <img src={userPhoto} alt={userName} className="w-6 h-6 rounded-full object-cover" />
+              ) : (
+                <div className="w-6 h-6 rounded-full bg-cyber-blue flex items-center justify-center">
+                  <span className="text-[10px] font-black text-black">
+                    {userName.charAt(0).toUpperCase()}
+                  </span>
+                </div>
+              )}
+              <span className="text-[10px] font-bold text-white/70 max-w-[80px] truncate">{userName}</span>
+            </div>
+          )}
+
           <AnimatePresence>
             {profileIncomplete && (
               <motion.div
@@ -92,12 +108,11 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
                 className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-cyber-red/10 border border-cyber-red/20 rounded-xl"
               >
                 <ShieldAlert className="w-3.5 h-3.5 text-cyber-red animate-pulse" />
-                <span className="text-[8px] font-black text-cyber-red uppercase tracking-widest">Setup Required</span>
+                <span className="text-[8px] font-black text-cyber-red uppercase tracking-widest">SetupRequired</span>
               </motion.div>
             )}
           </AnimatePresence>
 
-          {/* Feature 11: Service Provider Login Button */}
           {onServiceProviderLogin && (
             <button
               onClick={onServiceProviderLogin}
@@ -130,7 +145,6 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
         </div>
       </div>
 
-      {/* Mobile Menu */}
       <AnimatePresence>
         {isMenuOpen && (
           <motion.div
