@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, LayoutDashboard, Settings, LogOut, Menu, X, Gauge, AlertTriangle, Database, ChevronDown, Palette, Moon, Sun, Sparkles, RefreshCw } from 'lucide-react';
+import { Shield, LayoutDashboard, Settings, LogOut, Menu, X, Gauge, AlertTriangle, Database, ChevronDown, Palette, Moon, Sun, Sparkles, RefreshCw, User, LogIn, Users } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 
@@ -10,6 +10,8 @@ interface AegisNavbarProps {
   currentView: string;
   onSignOut?: () => void;
   onServiceProviderLogin?: () => void;
+  onLogin?: () => void;
+  onSwitchAccount?: () => void;
   userName?: string;
   userPhoto?: string;
   showUserMenu?: boolean;
@@ -18,7 +20,6 @@ interface AegisNavbarProps {
   setShowThemeMenu?: (show: boolean) => void;
   currentTheme?: string;
   setCurrentTheme?: (theme: string) => void;
-  onSwitchAccount?: () => void;
 }
 
 const THEMES = [
@@ -194,10 +195,24 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
                     </div>
                     <div className="p-2">
                       <button
+                        onClick={() => { onViewChange('profile'); setShowUserMenu?.(false); }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-white/70 hover:bg-white/5 hover:text-white transition-all"
+                      >
+                        <User className="w-4 h-4" />
+                        Profile
+                      </button>
+                      <button
+                        onClick={() => { onLogin?.(); setShowUserMenu?.(false); }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-white/70 hover:bg-white/5 hover:text-white transition-all"
+                      >
+                        <LogIn className="w-4 h-4" />
+                        Login
+                      </button>
+                      <button
                         onClick={() => { onSwitchAccount?.(); setShowUserMenu?.(false); }}
                         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-white/70 hover:bg-white/5 hover:text-white transition-all"
                       >
-                        <RefreshCw className="w-4 h-4" />
+                        <Users className="w-4 h-4" />
                         Switch Account
                       </button>
                       <button
@@ -205,7 +220,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
                         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-cyber-red hover:bg-cyber-red/10 transition-all"
                       >
                         <LogOut className="w-4 h-4" />
-                        Sign Out
+                        Logout
                       </button>
                     </div>
                   </motion.div>
