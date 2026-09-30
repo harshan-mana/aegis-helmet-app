@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, LayoutDashboard, Settings, User, LogOut, Menu, X, ShieldAlert, Gauge, AlertTriangle, Database } from 'lucide-react';
+import { Shield, LayoutDashboard, Settings, User, LogOut, Menu, X, ShieldAlert, Gauge, AlertTriangle, Database, ChevronDown, Palette, Moon, Sun, Sparkles, RefreshCw } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 
@@ -12,11 +12,27 @@ interface AegisNavbarProps {
   onServiceProviderLogin?: () => void;
   userName?: string;
   userPhoto?: string;
+  showUserMenu?: boolean;
+  setShowUserMenu?: (show: boolean) => void;
+  showThemeMenu?: boolean;
+  setShowThemeMenu?: (show: boolean) => void;
+  currentTheme?: string;
+  setCurrentTheme?: (theme: string) => void;
+  onSwitchAccount?: () => void;
 }
 
-export default function AegisNavbar({ userRole, onViewChange, currentView, onSignOut, onServiceProviderLogin, userName, userPhoto }: AegisNavbarProps) {
+const THEMES = [
+  { id: 'cyber', name: 'Cyber Night', icon: Moon, color: 'text-cyber-blue' },
+  { id: 'sunset', name: 'Sunset Glow', icon: Sun, color: 'text-cyber-orange' },
+  { id: 'aurora', name: 'Aurora', icon: Sparkles, color: 'text-cyber-purple' },
+  { id: 'ocean', name: 'Ocean', icon: Palette, color: 'text-cyber-green' },
+];
+
+export default function AegisNavbar({ userRole, onViewChange, currentView, onSignOut, onServiceProviderLogin, userName, userPhoto, showUserMenu, setShowUserMenu, showThemeMenu, setShowThemeMenu, currentTheme, setCurrentTheme, onSwitchAccount }: AegisNavbarProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [profileIncomplete, setProfileIncomplete] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  const themeMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!auth.currentUser) return;
@@ -25,16 +41,28 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
         const data = snap.data();
         setProfileIncomplete(!data.phone || !data.emergencyContact1?.phone);
       }
-    }, () => {
-      // ignore errors gracefully
-    });
+    }, () => {});
   }, []);
+
+  // Close menus when clicking outside
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setShowUserMenu?.(false);
+      }
+      if (themeMenuRef.current && !themeMenuRef.current.contains(e.target as Node)) {
+        setShowThemeMenu?.(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [setShowUserMenu, setShowThemeMenu]);
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: Gauge },
     { id: 'violations', label: 'Violations', icon: AlertTriangle },
-    { id: 'authority', label: 'RTO Command Center', icon: LayoutDashboard },
-    { id: 'settings', label: 'System Config', icon: Settings },
+    { id: 'authority', label: 'RTO Command', icon: LayoutDashboard },
+    { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
   return (
@@ -56,9 +84,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
             <span className="text-sm font-display font-black tracking-[0.25em] text-white">AEGIS AI</span>
             <div className="flex items-center gap-1.5">
               <div className="w-1.5 h-1.5 rounded-full bg-cyber-green animate-pulse" />
-              <span className="text-[9px] font-mono text-cyber-blue/80 uppercase tracking-widest">
-                SMART HELMET & RTO v2.5
-              </span>
+              <span className="text-[9px] font-mono text-cyber-blue/80 uppercase tracking-widest">v2.5</span>
             </div>
           </div>
         </div>
@@ -68,7 +94,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
             <button
               key={item.id}
               onClick={() => onViewChange(item.id as any)}
-              className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all relative overflow-hidden ${
+              className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all ${
                 currentView === item.id
                   ? 'text-black bg-cyber-blue shadow-[0_0_20px_#FF6B35]'
                   : 'text-white/50 hover:text-white hover:bg-white/5'
@@ -76,75 +102,126 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
             >
               <item.icon className="w-4 h-4" />
               {item.label}
-              {item.id === 'settings' && profileIncomplete && (
-                <span className="w-2 h-2 bg-cyber-red rounded-full animate-ping" />
-              )}
             </button>
           ))}
         </div>
 
         <div className="flex items-center gap-3 relative z-10">
-          {/* User Profile Avatar with Name */}
-          {userName && (
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-xl">
-              {userPhoto ? (
-                <img src={userPhoto} alt={userName} className="w-6 h-6 rounded-full object-cover" />
-              ) : (
-                <div className="w-6 h-6 rounded-full bg-cyber-blue flex items-center justify-center">
-                  <span className="text-[10px] font-black text-black">
-                    {userName.charAt(0).toUpperCase()}
-                  </span>
-                </div>
+          {/* Theme Selector */}
+          <div className="relative" ref={themeMenuRef}>
+            <button
+              onClick={() => { setShowThemeMenu?.(!showThemeMenu); setShowUserMenu?.(false); }}
+              className="p-2.5 bg-white/5 rounded-xl border border-white/10 text-white/50 hover:text-white transition-all"
+              title="Change Theme"
+            >
+              <Palette className="w-4 h-4" />
+            </button>
+            <AnimatePresence>
+              {showThemeMenu && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                  className="absolute right-0 top-12 w-48 glass-panel p-2 border-white/10 shadow-2xl"
+                >
+                  <p className="text-[9px] font-black uppercase tracking-widest text-white/40 px-3 py-2">Choose Theme</p>
+                  {THEMES.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => { setCurrentTheme?.(t.id); setShowThemeMenu?.(false); }}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                        currentTheme === t.id ? 'bg-white/10 text-white' : 'text-white/50 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <t.icon className={`w-4 h-4 ${t.color}`} />
+                      {t.name}
+                      {currentTheme === t.id && <div className="w-1.5 h-1.5 rounded-full bg-cyber-blue ml-auto" />}
+                    </button>
+                  ))}
+                </motion.div>
               )}
-              <span className="text-[10px] font-bold text-white/70 max-w-[80px] truncate">{userName}</span>
+            </AnimatePresence>
+          </div>
+
+          {/* User Profile Dropdown - Google Style */}
+          {userName && (
+            <div className="relative" ref={userMenuRef}>
+              <button
+                onClick={() => { setShowUserMenu?.(!showUserMenu); setShowThemeMenu?.(false); }}
+                className="flex items-center gap-2 pl-1 pr-2 py-1 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 transition-all"
+              >
+                {userPhoto ? (
+                  <img src={userPhoto} alt={userName} className="w-7 h-7 rounded-full object-cover" />
+                ) : (
+                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-cyber-blue to-cyber-purple flex items-center justify-center">
+                    <span className="text-xs font-black text-white">{userName.charAt(0).toUpperCase()}</span>
+                  </div>
+                )}
+                <span className="text-[10px] font-bold text-white/70 max-w-[60px] truncate hidden sm:block">{userName.split(' ')[0]}</span>
+                <ChevronDown className={`w-3 h-3 text-white/40 transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
+              </button>
+              <AnimatePresence>
+                {showUserMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                    className="absolute right-0 top-12 w-64 glass-panel border-white/10 shadow-2xl overflow-hidden"
+                  >
+                    {/* User Info Header */}
+                    <div className="p-4 bg-white/5 border-b border-white/10">
+                      <div className="flex items-center gap-3">
+                        {userPhoto ? (
+                          <img src={userPhoto} alt={userName} className="w-10 h-10 rounded-full object-cover" />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyber-blue to-cyber-purple flex items-center justify-center">
+                            <span className="text-sm font-black text-white">{userName.charAt(0).toUpperCase()}</span>
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-white truncate">{userName}</p>
+                          <p className="text-[10px] text-white/40 truncate">Driver</p>
+                        </div>
+                      </div>
+                    </div>
+                    {/* Menu Items */}
+                    <div className="p-2">
+                      <button
+                        onClick={() => { onSwitchAccount?.(); setShowUserMenu?.(false); }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-white/70 hover:bg-white/5 hover:text-white transition-all"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        Switch Account
+                      </button>
+                      <button
+                        onClick={() => { onServiceProviderLogin?.(); setShowUserMenu?.(false); }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-white/70 hover:bg-white/5 hover:text-white transition-all"
+                      >
+                        <Database className="w-4 h-4" />
+                        Service Provider
+                      </button>
+                      <button
+                        onClick={() => { onSignOut?.(); setShowUserMenu?.(false); }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-cyber-red hover:bg-cyber-red/10 transition-all"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        Sign Out
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           )}
 
-          <AnimatePresence>
-            {profileIncomplete && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.5 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-cyber-red/10 border border-cyber-red/20 rounded-xl"
-              >
-                <ShieldAlert className="w-3.5 h-3.5 text-cyber-red animate-pulse" />
-                <span className="text-[8px] font-black text-cyber-red uppercase tracking-widest">SetupRequired</span>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {onServiceProviderLogin && (
-            <button
-              onClick={onServiceProviderLogin}
-              className="hidden sm:flex items-center gap-2 px-3 py-2 bg-cyber-purple/10 border border-cyber-purple/30 rounded-xl text-cyber-purple hover:bg-cyber-purple/20 transition-all"
-              title="Service Provider Login"
-            >
-              <Database className="w-4 h-4" />
-              <span className="text-[9px] font-black uppercase tracking-wider">Provider</span>
-            </button>
-          )}
-
-          <button
-            id="btn-signout"
-            onClick={() => {
-              if (onSignOut) {
-                onSignOut();
-              } else {
-                auth.signOut().catch(() => {});
-              }
-            }}
-            className="p-2.5 bg-white/5 rounded-xl border border-white/10 text-white/40 hover:text-cyber-red hover:border-cyber-red/30 transition-all"
-            title="Sign Out"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-
+          {/* Mobile Menu Button */}
           <button className="md:hidden p-2 text-white/50 hover:text-white" onClick={() => setIsMenuOpen(!isMenuOpen)}>
             {isMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
         </div>
       </div>
 
+      {/* Mobile Menu */}
       <AnimatePresence>
         {isMenuOpen && (
           <motion.div
@@ -156,35 +233,15 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
             {navItems.map((item) => (
               <button
                 key={item.id}
-                onClick={() => {
-                  onViewChange(item.id as any);
-                  setIsMenuOpen(false);
-                }}
-                className={`w-full p-4 rounded-xl text-left text-[11px] font-black uppercase tracking-wider flex items-center justify-between transition-all ${
-                  currentView === item.id ? 'bg-cyber-blue text-black font-black' : 'text-white/60 hover:bg-white/5'
+                onClick={() => { onViewChange(item.id as any); setIsMenuOpen(false); }}
+                className={`w-full p-4 rounded-xl text-left text-[11px] font-black uppercase tracking-wider flex items-center gap-3 transition-all ${
+                  currentView === item.id ? 'bg-cyber-blue text-black' : 'text-white/60 hover:bg-white/5'
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <item.icon className="w-5 h-5" />
-                  {item.label}
-                </div>
-                {item.id === 'settings' && profileIncomplete && (
-                  <span className="px-2 py-0.5 bg-cyber-red text-white text-[8px] rounded-md font-bold">REQUIRED</span>
-                )}
+                <item.icon className="w-5 h-5" />
+                {item.label}
               </button>
             ))}
-            {onServiceProviderLogin && (
-              <button
-                onClick={() => {
-                  onServiceProviderLogin();
-                  setIsMenuOpen(false);
-                }}
-                className="w-full p-4 rounded-xl text-left text-[11px] font-black uppercase tracking-wider flex items-center gap-3 bg-cyber-purple/10 text-cyber-purple"
-              >
-                <Database className="w-5 h-5" />
-                Service Provider Login
-              </button>
-            )}
           </motion.div>
         )}
       </AnimatePresence>
