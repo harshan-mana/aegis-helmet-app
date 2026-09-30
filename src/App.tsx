@@ -287,6 +287,7 @@ export default function App() {
         onViewChange={setCurrentView}
         currentView={currentView}
         onSignOut={handleSignOut}
+        onLogin={() => setIsAuthModalOpen(true)}
         onServiceProviderLogin={() => setIsServiceProviderOpen(true)}
         userName={effectiveUser?.displayName || undefined}
         userPhoto={effectiveUser?.photoURL || undefined}
