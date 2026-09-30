@@ -73,7 +73,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
   };
 
   return (
-    <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-[80] w-[95%] max-w-5xl">
+    <nav className="relative z-[80] w-full max-w-5xl mx-auto px-4 sm:px-8 pt-6">
       <div className="glass-panel px-6 py-3.5 border-white/10 flex items-center justify-between relative overflow-hidden group shadow-[0_0_40px_rgba(0,0,0,0.8)]">
         <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-20">
           <motion.div
