@@ -254,9 +254,12 @@ export default function DashboardView() {
     }
   }, []);
 
-  // Auto-start camera and detection on component mount
+  // Auto-start camera and detection on component mount (with delay to ensure video element is rendered)
   useEffect(() => {
-    startWebcam();
+    const timer = setTimeout(() => {
+      startWebcam();
+    }, 500);
+    return () => clearTimeout(timer);
   }, [startWebcam]);
 
   const stopWebcam = useCallback(() => {
