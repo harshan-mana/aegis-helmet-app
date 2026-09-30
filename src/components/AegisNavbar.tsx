@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, LayoutDashboard, Settings, LogOut, Menu, X, Gauge, AlertTriangle, Database, ChevronDown, Palette, Moon, Sun, Sparkles, RefreshCw, Grid3x3, User } from 'lucide-react';
+import { Shield, LayoutDashboard, Settings, LogOut, X, Gauge, AlertTriangle, Database, ChevronDown, Palette, Moon, Sun, Sparkles, RefreshCw, User } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 
@@ -31,11 +31,11 @@ const THEMES = [
 const AVATAR_COLORS = ['bg-pink-500', 'bg-purple-500', 'bg-blue-500', 'bg-green-500', 'bg-orange-500', 'bg-red-500', 'bg-teal-500', 'bg-indigo-500'];
 
 export default function AegisNavbar({ userRole, onViewChange, currentView, onSignOut, onServiceProviderLogin, userName, userPhoto, showUserMenu, setShowUserMenu, showThemeMenu, setShowThemeMenu, currentTheme, setCurrentTheme, onSwitchAccount }: AegisNavbarProps) {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [showAppsMenu, setShowAppsMenu] = useState(false);
   const [profileIncomplete, setProfileIncomplete] = useState(false);
+  const appsMenuRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const themeMenuRef = useRef<HTMLDivElement>(null);
-  const appsMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!auth.currentUser) return;
@@ -50,14 +50,14 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
   // Close menus when clicking outside
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
+      if (appsMenuRef.current && !appsMenuRef.current.contains(e.target as Node)) {
+        setShowAppsMenu(false);
+      }
       if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
         setShowUserMenu?.(false);
       }
       if (themeMenuRef.current && !themeMenuRef.current.contains(e.target as Node)) {
         setShowThemeMenu?.(false);
-      }
-      if (appsMenuRef.current && !appsMenuRef.current.contains(e.target as Node)) {
-        setIsMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClick);
@@ -87,19 +87,66 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
           />
         </div>
 
+        {/* Aegis Shield Logo - Click to show all options */}
         <div className="flex items-center gap-3.5 relative z-10">
-          <div className="p-2.5 bg-cyber-blue rounded-2xl shadow-[0_0_20px_#FF6B35] group-hover:scale-105 transition-transform flex items-center justify-center">
-            <Shield className="w-5 h-5 text-black" />
-          </div>
-          <div>
-            <span className="text-sm font-display font-black tracking-[0.25em] text-white">AEGIS AI</span>
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-cyber-green animate-pulse" />
-              <span className="text-[9px] font-mono text-cyber-blue/80 uppercase tracking-widest">v2.5</span>
-            </div>
+          <div className="relative" ref={appsMenuRef}>
+            <button
+              onClick={() => { setShowAppsMenu(!showAppsMenu); setShowUserMenu?.(false); setShowThemeMenu?.(false); }}
+              className="flex items-center gap-3 group"
+            >
+              <div className="p-2.5 bg-cyber-blue rounded-2xl shadow-[0_0_20px_#FF6B35] group-hover:scale-105 transition-transform flex items-center justify-center">
+                <Shield className="w-5 h-5 text-black" />
+              </div>
+              <div>
+                <span className="text-sm font-display font-black tracking-[0.25em] text-white">AEGIS AI</span>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-cyber-green animate-pulse" />
+                  <span className="text-[9px] font-mono text-cyber-blue/80 uppercase tracking-widest">v2.5</span>
+                </div>
+              </div>
+            </button>
+
+            {/* Apps Menu Dropdown - Shows all options */}
+            <AnimatePresence>
+              {showAppsMenu && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                  className="absolute left-0 top-14 w-64 glass-panel border-white/10 shadow-2xl overflow-hidden"
+                >
+                  <div className="p-2">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40 px-3 py-2">All Options</p>
+                    {navItems.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => { onViewChange(item.id as any); setShowAppsMenu(false); }}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                          currentView === item.id ? 'bg-cyber-blue/10 text-cyber-blue' : 'text-white/70 hover:bg-white/5 hover:text-white'
+                        }`}
+                      >
+                        <item.icon className={`w-4 h-4 ${item.color}`} />
+                        {item.label}
+                        {currentView === item.id && <div className="w-1.5 h-1.5 rounded-full bg-cyber-blue ml-auto" />}
+                      </button>
+                    ))}
+                    <div className="border-t border-white/10 mt-2 pt-2">
+                      <button
+                        onClick={() => { onServiceProviderLogin?.(); setShowAppsMenu(false); }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-cyber-purple hover:bg-cyber-purple/10 transition-all"
+                      >
+                        <Database className="w-4 h-4" />
+                        Service Provider
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
 
+        {/* Center Nav - Hidden on mobile */}
         <div className="hidden md:flex items-center gap-1.5 bg-white/5 p-1 rounded-2xl border border-white/5 relative z-10">
           {navItems.map((item) => (
             <button
@@ -117,56 +164,12 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
           ))}
         </div>
 
+        {/* Right Side - Theme + User */}
         <div className="flex items-center gap-3 relative z-10">
-          {/* Google-Style Apps Menu (Waffle Grid) */}
-          <div className="relative" ref={appsMenuRef}>
-            <button
-              onClick={() => { setIsMenuOpen(!isMenuOpen); setShowUserMenu?.(false); setShowThemeMenu?.(false); }}
-              className="p-2.5 bg-white/5 rounded-xl border border-white/10 text-white/50 hover:text-white transition-all"
-              title="Apps Menu"
-            >
-              <Grid3x3 className="w-4 h-4" />
-            </button>
-            <AnimatePresence>
-              {isMenuOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                  className="absolute right-0 top-12 w-72 glass-panel border-white/10 shadow-2xl p-4"
-                >
-                  <div className="grid grid-cols-3 gap-3">
-                    {navItems.map((item) => (
-                      <button
-                        key={item.id}
-                        onClick={() => { onViewChange(item.id as any); setIsMenuOpen(false); }}
-                        className="flex flex-col items-center gap-2 p-3 rounded-xl hover:bg-white/5 transition-all"
-                      >
-                        <div className={`w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center ${item.color}`}>
-                          <item.icon className="w-5 h-5" />
-                        </div>
-                        <span className="text-[9px] font-bold text-white/60">{item.label}</span>
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => { onServiceProviderLogin?.(); setIsMenuOpen(false); }}
-                      className="flex flex-col items-center gap-2 p-3 rounded-xl hover:bg-white/5 transition-all"
-                    >
-                      <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-cyber-purple">
-                        <Database className="w-5 h-5" />
-                      </div>
-                      <span className="text-[9px] font-bold text-white/60">Provider</span>
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
           {/* Theme Selector */}
           <div className="relative" ref={themeMenuRef}>
             <button
-              onClick={() => { setShowThemeMenu?.(!showThemeMenu); setShowUserMenu?.(false); setIsMenuOpen(false); }}
+              onClick={() => { setShowThemeMenu?.(!showThemeMenu); setShowUserMenu?.(false); setShowAppsMenu(false); }}
               className="p-2.5 bg-white/5 rounded-xl border border-white/10 text-white/50 hover:text-white transition-all"
               title="Change Theme"
             >
@@ -199,11 +202,11 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
             </AnimatePresence>
           </div>
 
-          {/* Google-Style User Profile Dropdown */}
+          {/* User Profile Dropdown - Google Style */}
           {userName && (
             <div className="relative" ref={userMenuRef}>
               <button
-                onClick={() => { setShowUserMenu?.(!showUserMenu); setShowThemeMenu?.(false); setIsMenuOpen(false); }}
+                onClick={() => { setShowUserMenu?.(!showUserMenu); setShowThemeMenu?.(false); setShowAppsMenu(false); }}
                 className="flex items-center gap-2 pl-1 pr-2 py-1 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 transition-all"
               >
                 {userPhoto ? (
@@ -221,9 +224,8 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
                     initial={{ opacity: 0, y: -10, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                    className="absolute right-0 top-12 w-72 glass-panel border-white/10 shadow-2xl overflow-hidden"
+                    className="absolute right-0 top-12 w-64 glass-panel border-white/10 shadow-2xl overflow-hidden"
                   >
-                    {/* User Info Header - Google Style */}
                     <div className="p-4 bg-white/5 border-b border-white/10">
                       <div className="flex items-center gap-3">
                         {userPhoto ? (
@@ -239,7 +241,6 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
                         </div>
                       </div>
                     </div>
-                    {/* Menu Items */}
                     <div className="p-2">
                       <button
                         onClick={() => { onSwitchAccount?.(); setShowUserMenu?.(false); }}
@@ -247,13 +248,6 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
                       >
                         <RefreshCw className="w-4 h-4" />
                         Switch Account
-                      </button>
-                      <button
-                        onClick={() => { onServiceProviderLogin?.(); setShowUserMenu?.(false); }}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-white/70 hover:bg-white/5 hover:text-white transition-all"
-                      >
-                        <Database className="w-4 h-4" />
-                        Service Provider
                       </button>
                       <button
                         onClick={() => { onSignOut?.(); setShowUserMenu?.(false); }}
@@ -268,11 +262,6 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
               </AnimatePresence>
             </div>
           )}
-
-          {/* Mobile Menu Button */}
-          <button className="md:hidden p-2 text-white/50 hover:text-white" onClick={() => setIsMenuOpen(!isMenuOpen)}>
-            {isMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-          </button>
         </div>
       </div>
     </nav>
