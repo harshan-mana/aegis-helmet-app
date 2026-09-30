@@ -180,7 +180,13 @@ export default function App() {
   };
 
   const submitOnboarding = async () => {
-    if (!effectiveUser) return;
+    // Use localUser directly to avoid stale closure issues
+    const currentUser = user || localUser;
+    if (!currentUser) {
+      console.warn('No user available for onboarding');
+      return;
+    }
+
     const nameRegex = /^[a-zA-Z\s]+$/;
     const phoneRegex = /^\d{10,15}$/;
     const newErrors: {[key: string]: string} = {};
