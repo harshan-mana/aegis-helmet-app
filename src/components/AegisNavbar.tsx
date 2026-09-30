@@ -175,7 +175,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
                     initial={{ opacity: 0, y: -10, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                    className="absolute right-0 top-12 w-64 glass-panel border-white/10 shadow-2xl overflow-hidden"
+                    className="absolute right-0 top-12 w-64 glass-panel border-white/10 shadow-2xl overflow-hidden z-[100]"
                   >
                     <div className="p-4 bg-white/5 border-b border-white/10">
                       <div className="flex items-center gap-3">
