@@ -72,11 +72,13 @@ export default function DashboardView() {
   // Webcam state
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [isWebcamActive, setIsWebcamActive] = useState(false);
   const [webcamError, setWebcamError] = useState<string | null>(null);
   const [detectionActive, setDetectionActive] = useState(false);
   const [detectedObjects, setDetectedObjects] = useState<string[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
 
   // Feature 1: Detected vehicles with license plates
   const [detectedVehicles, setDetectedVehicles] = useState<DetectedVehicle[]>([]);
@@ -231,15 +233,19 @@ export default function DashboardView() {
   const startWebcam = useCallback(async () => {
     setWebcamError(null);
     try {
+      // Stop any existing stream first
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'environment' },
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode },
       });
+      streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.play();
         setIsWebcamActive(true);
-        // Auto-start tracking when camera starts
         setIsTracking(true);
-        // Auto-start detection when camera starts
         setDetectionActive(true);
       }
     } catch (err: any) {
@@ -252,7 +258,7 @@ export default function DashboardView() {
         setWebcamError(err.message || 'Camera access failed.');
       }
     }
-  }, []);
+  }, [facingMode]);
 
   // Auto-start camera and detection on component mount (with delay to ensure video element is rendered)
   useEffect(() => {
@@ -263,9 +269,11 @@ export default function DashboardView() {
   }, [startWebcam]);
 
   const stopWebcam = useCallback(() => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach((track) => track.stop());
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
     setIsWebcamActive(false);
@@ -552,6 +560,21 @@ export default function DashboardView() {
                 </button>
               ) : (
                 <>
+                  {/* Front/Rear camera toggle */}
+                  <button
+                    onClick={() => {
+                      const newFacing = facingMode === 'user' ? 'environment' : 'user';
+                      setFacingMode(newFacing);
+                      // Restart camera with new facing mode
+                      stopWebcam();
+                      setTimeout(() => startWebcam(), 100);
+                    }}
+                    className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all"
+                    title={facingMode === 'user' ? 'Switch to Rear Camera' : 'Switch to Front Camera'}
+                  >
+                    <Camera className="w-4 h-4" />
+                    {facingMode === 'user' ? 'Front' : 'Rear'}
+                  </button>
                   <button
                     onClick={() => setDetectionActive(!detectionActive)}
                     className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all ${
