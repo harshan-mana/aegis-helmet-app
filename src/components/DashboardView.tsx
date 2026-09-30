@@ -348,7 +348,7 @@ export default function DashboardView() {
   return (
     <div className="pt-24 pb-16 px-4 sm:px-8 max-w-[1700px] mx-auto space-y-6">
       {/* TOP HUD - 3 METRICS - Sticky at top */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sticky top-24 z-30">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sticky top-6 z-30">
         {/* 1. Digital Speedometer with Detected Vehicles */}
         <div className="glass-panel p-5 border-cyber-blue/20 relative overflow-hidden">
           <div className="flex items-center gap-2 mb-3">
