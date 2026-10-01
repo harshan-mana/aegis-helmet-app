@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Shield, Chrome, Apple, Mail, User, Lock, ArrowRight, Zap } from 'lucide-react';
+import { Shield, Chrome, Apple, Mail, User, Lock, ArrowRight, ArrowLeft, Zap } from 'lucide-react';
 import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { auth, googleProvider, appleProvider } from '../lib/firebase';
 import { AegisAuthUser } from '../types/auth';
