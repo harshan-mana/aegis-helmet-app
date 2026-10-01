@@ -123,6 +123,20 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
 
   const [newFeature, setNewFeature] = useState({ name: '', description: '', icon: 'gauge', route: 'dashboard' });
 
+  // Favourites state
+  const [favourites, setFavourites] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('aegis_favourites');
+      return saved ? JSON.parse(saved) : ['dashboard', 'violations', 'authority', 'settings'];
+    } catch { return ['dashboard', 'violations', 'authority', 'settings']; }
+  });
+  const [showFavourites, setShowFavourites] = useState(false);
+  const [favouritesPos, setFavouritesPos] = useState({ top: 0, left: 0 });
+  const [editFavourites, setEditFavourites] = useState(false);
+
+  // Save favourites
+  useEffect(() => { localStorage.setItem('aegis_favourites', JSON.stringify(favourites)); }, [favourites]);
+
   // Save features
   useEffect(() => { localStorage.setItem('aegis_features', JSON.stringify(features)); }, [features]);
 
@@ -181,6 +195,46 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     setShowUserMenu(!showUserMenu);
     setLauncherOpen(false);
     setShowThemeMenu(false);
+    setShowFavourites(false);
+  };
+
+  // Toggle favourites
+  const toggleFavourites = useCallback(() => {
+    if (!showFavourites) {
+      if (gridRef.current) {
+        const rect = gridRef.current.getBoundingClientRect();
+        const w = 480;
+        let left = rect.right - w;
+        if (left < 8) left = 8;
+        if (left + w > window.innerWidth - 8) left = window.innerWidth - w - 8;
+        setFavouritesPos({ top: rect.bottom + 10, left });
+      }
+    }
+    setShowFavourites(!showFavourites);
+    setShowUserMenu(false);
+    setLauncherOpen(false);
+    setShowThemeMenu(false);
+  }, [showFavourites]);
+
+  // Favourites handlers
+  const handleRemoveFavourite = (id: string) => {
+    setFavourites(favourites.filter(f => f !== id));
+  };
+
+  const handleAddFavourite = (id: string) => {
+    if (!favourites.includes(id)) {
+      setFavourites([...favourites, id]);
+    }
+  };
+
+  const handleMoveFavourite = (id: string, dir: 'up' | 'down') => {
+    const idx = favourites.indexOf(id);
+    if (idx === -1) return;
+    const newIdx = dir === 'up' ? idx - 1 : idx + 1;
+    if (newIdx < 0 || newIdx >= favourites.length) return;
+    const arr = [...favourites];
+    [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
+    setFavourites(arr);
   };
 
   // Close on outside click
@@ -548,6 +602,149 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
 
   const speedColor = speedKmh > 80 ? '#FF4D4D' : speedKmh > 50 ? '#FFB347' : '#FFD18C';
 
+  // Favourites portal renderer
+  const renderFavourites = () => {
+    if (!showFavourites) return null;
+    return createPortal(
+      <motion.div
+        initial={{ opacity: 0, y: -8, scale: 0.95 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: -8, scale: 0.95 }}
+        transition={{ duration: 0.15 }}
+        className="fixed w-[480px] max-w-[calc(100vw-16px)] bg-[#0d0d0f] border border-white/10 rounded-3xl shadow-[0_0_60px_rgba(255,107,53,0.15)] overflow-hidden"
+        style={{ top: favouritesPos.top, left: favouritesPos.left, zIndex: 99999, maxHeight: 'calc(100vh - 120px)' }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-white/10">
+          <h3 className="text-sm font-black uppercase tracking-widest text-white">
+            {editFavourites ? 'Edit Favourites' : 'AEGIS Favourites'}
+          </h3>
+          <button
+            onClick={() => setEditFavourites(!editFavourites)}
+            className="p-1.5 text-white/40 hover:text-white rounded-lg hover:bg-white/5"
+            aria-label="Edit favourites"
+          >
+            {editFavourites ? <Check className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-5 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+          {editFavourites ? (
+            <div className="space-y-2">
+              {favourites.map((fId) => {
+                const feature = features.find(f => f.id === fId);
+                if (!feature) return null;
+                const Icon = getIcon(feature.icon);
+                const idx = favourites.indexOf(fId);
+                return (
+                  <div key={fId} className="flex items-center gap-2 p-2.5 bg-white/5 rounded-xl border border-white/10">
+                    <Icon className="w-4 h-4 text-white/50" />
+                    <span className="flex-1 text-xs font-bold text-white truncate">{feature.name}</span>
+                    <button onClick={() => handleMoveFavourite(fId, 'up')} disabled={idx === 0} className="p-1 text-white/40 hover:text-white disabled:opacity-30" aria-label="Move up"><ChevronUp className="w-3 h-3" /></button>
+                    <button onClick={() => handleMoveFavourite(fId, 'down')} disabled={idx === favourites.length - 1} className="p-1 text-white/40 hover:text-white disabled:opacity-30" aria-label="Move down"><ChevronDown className="w-3 h-3" /></button>
+                    <button onClick={() => handleRemoveFavourite(fId)} className="p-1 text-white/40 hover:text-cyber-red" aria-label="Remove favourite"><Trash2 className="w-3 h-3" /></button>
+                  </div>
+                );
+              })}
+              {/* Add favourite - show available features not yet in favourites */}
+              {features.filter(f => !favourites.includes(f.id)).length > 0 && (
+                <div className="pt-2">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-2">Available to add</p>
+                  <div className="space-y-1">
+                    {features.filter(f => !favourites.includes(f.id)).map((f) => {
+                      const Icon = getIcon(f.icon);
+                      return (
+                        <button key={f.id} onClick={() => handleAddFavourite(f.id)}
+                          className="w-full flex items-center gap-2 p-2 rounded-xl text-xs font-bold text-white/50 hover:bg-white/5 hover:text-white transition-all">
+                          <Icon className="w-4 h-4" />{f.name}
+                          <Plus className="w-3 h-3 ml-auto" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-3">
+              {favourites.map((fId) => {
+                const feature = features.find(f => f.id === fId);
+                if (!feature) return null;
+                const Icon = getIcon(feature.icon);
+                return (
+                  <button key={fId} onClick={() => handleFeatureClick(feature.route)}
+                    className="flex flex-col items-center gap-2 p-3 rounded-xl hover:bg-white/5 transition-all group">
+                    <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center group-hover:bg-cyber-blue/10 transition-all">
+                      <Icon className="w-5 h-5 text-white/70 group-hover:text-cyber-blue transition-all" />
+                    </div>
+                    <span className="text-[10px] font-bold text-white/70 group-hover:text-white text-center leading-tight">{feature.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </motion.div>,
+      document.body
+    );
+  };
+
+  // Account Profile portal renderer
+  const renderAccountProfile = () => {
+    if (!showUserMenu) return null;
+    return createPortal(
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -8 }}
+        transition={{ duration: 0.15 }}
+        className="fixed w-[280px] bg-[#0d0d0f] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+        style={{ top: accountPos.top, left: accountPos.left, zIndex: 99999 }}
+      >
+        {/* Account Header */}
+        <div className="p-4 bg-white/5 border-b border-white/10">
+          <div className="flex items-center gap-3">
+            {userPhoto ? <img src={userPhoto} alt={userName} className="w-10 h-10 rounded-full object-cover" /> :
+              <div className={`w-10 h-10 rounded-full ${getAvatarColor(userName || 'U')} flex items-center justify-center`}>
+                <span className="text-sm font-black text-white">{(userName || 'U').charAt(0).toUpperCase()}</span>
+              </div>}
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-white truncate">{userName || 'User'}</p>
+              <p className="text-[10px] text-white/40 truncate">harshan@example.com</p>
+              <p className="text-[10px] text-cyber-green font-bold">Driver • Active</p>
+            </div>
+          </div>
+        </div>
+        {/* Menu Items */}
+        <div className="p-2">
+          <button onClick={() => { onViewChange?.('profile'); setShowUserMenu(false); }}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-white/70 hover:bg-white/5 hover:text-white transition-all">
+            <User className="w-4 h-4" />Profile
+          </button>
+          <button onClick={() => { onViewChange?.('settings'); setShowUserMenu(false); }}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-white/70 hover:bg-white/5 hover:text-white transition-all">
+            <Settings className="w-4 h-4" />Account Settings
+          </button>
+          <button onClick={() => setShowUserMenu(false)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-white/70 hover:bg-white/5 hover:text-white transition-all">
+            <Bell className="w-4 h-4" />Notifications
+          </button>
+          <button onClick={handleSwitchAccount}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-white/70 hover:bg-white/5 hover:text-white transition-all">
+            <Users className="w-4 h-4" />Switch Account
+          </button>
+          <div className="border-t border-white/10 my-2"></div>
+          <button onClick={() => setShowLogoutConfirm(true)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-cyber-red hover:bg-cyber-red/10 transition-all">
+            <LogOut className="w-4 h-4" />Sign Out
+          </button>
+        </div>
+      </motion.div>,
+      document.body
+    );
+  };
+
   // Portal renderers
   const renderLauncher = () => {
     if (!launcherOpen) return null;
@@ -796,7 +993,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
       {/* Utility Controls - Above GPS Satellite card */}
       <div className="flex justify-end mb-3">
         <div className="flex items-center gap-3">
-          <button ref={gridRef} onClick={toggleLauncher} aria-label="Open AEGIS feature launcher"
+          <button ref={gridRef} onClick={toggleFavourites} aria-label="Open AEGIS favourites"
             className="p-2.5 bg-white/5 rounded-xl border border-white/10 text-white/50 hover:text-white transition-all">
             <Grid3x3 className="w-4 h-4" />
           </button>
@@ -1330,8 +1527,9 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
 
       {/* Portal-based dropdowns - rendered to document.body to escape all clipping contexts */}
       <AnimatePresence>{renderLauncher()}</AnimatePresence>
+      <AnimatePresence>{renderFavourites()}</AnimatePresence>
       <AnimatePresence>{renderThemeMenu()}</AnimatePresence>
-      <AnimatePresence>{renderAccountMenu()}</AnimatePresence>
+      <AnimatePresence>{renderAccountProfile()}</AnimatePresence>
       <AnimatePresence>{renderAddFeatureModal()}</AnimatePresence>
       <AnimatePresence>{renderLogoutConfirm()}</AnimatePresence>
       <AnimatePresence>{renderSwitchAccount()}</AnimatePresence>
