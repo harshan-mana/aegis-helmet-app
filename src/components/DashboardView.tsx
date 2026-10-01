@@ -181,6 +181,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     setShowUserMenu(false);
     setShowThemeMenu(false);
     setCustomizeMode(false);
+    setShowFavourites(false);
   };
 
   const toggleThemeMenu = () => {
@@ -188,6 +189,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     setShowThemeMenu(!showThemeMenu);
     setShowUserMenu(false);
     setLauncherOpen(false);
+    setShowFavourites(false);
   };
 
   const toggleAccountMenu = () => {
@@ -313,12 +315,14 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   const getAvatarColor = (name: string) => AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length];
   const getIcon = (iconName: string) => ICON_MAP[iconName] || Gauge;
 
-  // IMU Accelerometer state
-  const [accelX, setAccelX] = useState(0);
-  const [accelY, setAccelY] = useState(0);
-  const [accelZ, setAccelZ] = useState(0);
-  const [gForce, setGForce] = useState(0);
-  const [isMoving, setIsMoving] = useState(false);
+  // ESP32-CAM state
+  const [esp32Connected, setEsp32Connected] = useState(false);
+  const [esp32StreamUrl, setEsp32StreamUrl] = useState('http://192.168.4.1:81/stream');
+  const [esp32Data, setEsp32Data] = useState<{ speed: number; persons: number; plates: string[] } | null>(null);
+
+  // Person detection state
+  const [detectedPersons, setDetectedPersons] = useState<string[]>([]);
+  const [capturedImages, setCapturedImages] = useState<string[]>([]);
 
   // GPS state
   const [gpsStatus, setGpsStatus] = useState<'searching' | 'locked' | 'denied' | 'unavailable'>('searching');
@@ -1014,8 +1018,8 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
         </div>
       </div>
 
-      {/* TOP HUD - 3 METRICS - Scrolls naturally with page */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* TOP HUD - 2 METRICS - Scrolls naturally with page */}
+      <div className="grid grid-cols-2 gap-4">
         {/* 1. Digital Speedometer with Detected Vehicles */}
         <div className="glass-panel p-5 border-cyber-blue/20 relative overflow-hidden">
           <div className="flex items-center gap-2 mb-3">
@@ -1024,10 +1028,13 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
           </div>
           <div className="flex items-end gap-2">
             <span className="text-4xl font-display font-black tracking-tight" style={{ color: speedColor }}>
-              {speedKmh.toFixed(0)}
+              {esp32Connected && esp32Data ? esp32Data.speed : speedKmh.toFixed(0)}
             </span>
             <span className="text-sm text-white/50 font-mono mb-1">km/h</span>
           </div>
+          {esp32Connected && esp32Data && (
+            <p className="text-[9px] font-mono text-cyber-green mt-1">ESP32-CAM Live Data</p>
+          )}
           <div className="mt-3 h-2 bg-white/5 rounded-full overflow-hidden">
             <motion.div
               className="h-full rounded-full"
@@ -1074,38 +1081,70 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
           )}
         </div>
 
-        {/* 2. IMU Accelerometer */}
+        {/* 2. ESP32-CAM Connection */}
         <div className="glass-panel p-5 border-cyber-green/20 relative overflow-hidden">
-          <div className="flex items-center gap-2 mb-3">
-            <Activity className="w-5 h-5 text-cyber-green" />
-            <span className="text-[10px] font-black uppercase tracking-widest text-white/40">IMU Accelerometer</span>
-          </div>
-          <div className="flex items-end gap-2">
-            <span className={`text-4xl font-display font-black tracking-tight ${isMoving ? 'text-cyber-green' : 'text-white/30'}`}>
-              {gForce.toFixed(1)}
-            </span>
-            <span className="text-sm text-white/50 font-mono mb-1">G</span>
-          </div>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-            <div className="bg-white/5 rounded-lg p-2">
-              <p className="text-[8px] text-white/40 uppercase">X</p>
-              <p className="text-xs font-mono font-bold text-white">{accelX.toFixed(1)}</p>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Camera className="w-5 h-5 text-cyber-green" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-white/40">ESP32-CAM</span>
             </div>
-            <div className="bg-white/5 rounded-lg p-2">
-              <p className="text-[8px] text-white/40 uppercase">Y</p>
-              <p className="text-xs font-mono font-bold text-white">{accelY.toFixed(1)}</p>
-            </div>
-            <div className="bg-white/5 rounded-lg p-2">
-              <p className="text-[8px] text-white/40 uppercase">Z</p>
-              <p className="text-xs font-mono font-bold text-white">{accelZ.toFixed(1)}</p>
-            </div>
+            <button
+              onClick={() => setEsp32Connected(!esp32Connected)}
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
+                esp32Connected
+                  ? 'bg-cyber-green/20 text-cyber-green border border-cyber-green/30'
+                  : 'bg-white/5 text-white/50 border border-white/10 hover:bg-white/10'
+              }`}
+            >
+              {esp32Connected ? 'Connected' : 'Connect'}
+            </button>
           </div>
-          <div className="mt-2 flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isMoving ? 'bg-cyber-green animate-pulse' : 'bg-white/20'}`} />
-            <span className="text-[9px] font-mono text-white/40 uppercase">
-              {isMoving ? 'Motion Detected' : 'Stationary (0G)'}
-            </span>
-          </div>
+          {esp32Connected ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-[10px] font-mono text-cyber-green">
+                <div className="w-2 h-2 rounded-full bg-cyber-green animate-pulse" />
+                <span>Live via Mobile WiFi</span>
+              </div>
+              {esp32Data && (
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-white/5 rounded-lg p-2">
+                    <p className="text-[8px] text-white/40 uppercase">Speed</p>
+                    <p className="text-xs font-mono font-bold text-cyber-green">{esp32Data.speed} km/h</p>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-2">
+                    <p className="text-[8px] text-white/40 uppercase">Persons</p>
+                    <p className="text-xs font-mono font-bold text-cyber-blue">{esp32Data.persons}</p>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-2">
+                    <p className="text-[8px] text-white/40 uppercase">Plates</p>
+                    <p className="text-xs font-mono font-bold text-cyber-purple">{esp32Data.plates.length}</p>
+                  </div>
+                </div>
+              )}
+              {detectedPersons.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-white/40">Detected Persons</p>
+                  {detectedPersons.map((person, idx) => (
+                    <div key={idx} className="flex items-center gap-2 bg-white/5 rounded-lg px-2 py-1.5">
+                      <User className="w-3.5 h-3.5 text-cyber-blue" />
+                      <span className="text-[10px] font-bold text-white">{person}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-[10px] text-white/40">Connect ESP32-CAM via mobile WiFi hotspot</p>
+              <input
+                type="text"
+                value={esp32StreamUrl}
+                onChange={(e) => setEsp32StreamUrl(e.target.value)}
+                placeholder="Stream URL"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyber-green"
+              />
+            </div>
+          )}
         </div>
 
         {/* 3. GPS Satellite Link */}
@@ -1210,6 +1249,25 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                   >
                     <Crosshair className="w-4 h-4" />
                     {detectionActive ? 'Stop Detection' : 'YOLOv8 Detect'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (videoRef.current && canvasRef.current) {
+                        const canvas = canvasRef.current;
+                        const ctx = canvas.getContext('2d');
+                        if (ctx) {
+                          canvas.width = videoRef.current.videoWidth || 640;
+                          canvas.height = videoRef.current.videoHeight || 360;
+                          ctx.drawImage(videoRef.current, 0, 0);
+                          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                          setCapturedImages(prev => [...prev, dataUrl]);
+                        }
+                      }
+                    }}
+                    className="px-4 py-2 bg-cyber-green text-black rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-all"
+                  >
+                    <Camera className="w-4 h-4" />
+                    Capture
                   </button>
                   <button
                     onClick={stopWebcam}
@@ -1327,6 +1385,28 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                   </p>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Captured Images Gallery */}
+          {capturedImages.length > 0 && (
+            <div className="glass-panel p-5 border-white/10">
+              <h3 className="text-xs font-black uppercase tracking-widest text-white mb-4 flex items-center gap-2">
+                <Camera className="w-4 h-4 text-cyber-green" /> Captured Images ({capturedImages.length})
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {capturedImages.map((img, idx) => (
+                  <div key={idx} className="relative group">
+                    <img src={img} alt={`Captured ${idx + 1}`} className="w-full h-24 object-cover rounded-xl border border-white/10" />
+                    <button
+                      onClick={() => setCapturedImages(prev => prev.filter((_, i) => i !== idx))}
+                      className="absolute top-1 right-1 p-1 bg-cyber-red/80 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
