@@ -23,6 +23,20 @@ export default function LandingPage({ onLogin }: LandingPageProps) {
   const [guestName, setGuestName] = useState('');
   const [guestPassword, setGuestPassword] = useState('');
   const [isCreatingGuest, setIsCreatingGuest] = useState(false);
+  const [guestAccounts, setGuestAccounts] = useState<{[key: string]: {name: string; password: string}}>(() => {
+    try {
+      const saved = localStorage.getItem('aegis_guest_accounts');
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
+  });
+
+  // Default guest password
+  const DEFAULT_GUEST_PASSWORD = 'guest123';
+
+  // Save guest accounts
+  useEffect(() => {
+    localStorage.setItem('aegis_guest_accounts', JSON.stringify(guestAccounts));
+  }, [guestAccounts]);
 
   const deriveRole = (email: string): 'Driver' | 'RTO' =>
     email.toLowerCase().includes('rto') || email.toLowerCase().includes('admin') ? 'RTO' : 'Driver';
@@ -111,6 +125,16 @@ export default function LandingPage({ onLogin }: LandingPageProps) {
         setError('Please fill all guest fields');
         return;
       }
+      // Check if guest ID already exists
+      if (guestAccounts[guestId]) {
+        setError('Guest ID already exists. Please choose a different ID.');
+        return;
+      }
+      // Save guest account
+      setGuestAccounts(prev => ({
+        ...prev,
+        [guestId]: { name: guestName, password: guestPassword }
+      }));
       const guest: AegisAuthUser = {
         uid: `guest_${guestId}`,
         displayName: guestName,
@@ -132,24 +156,25 @@ export default function LandingPage({ onLogin }: LandingPageProps) {
         setError('Please enter Guest ID and Password');
         return;
       }
-      const savedData = localStorage.getItem('aegis_guest_data');
-      if (savedData) {
-        const data = JSON.parse(savedData);
-        if (data.guestId === guestId && data.guestPassword === guestPassword) {
-          const guest: AegisAuthUser = {
-            uid: `guest_${guestId}`,
-            displayName: data.guestName,
-            email: `${guestId}@guest.local`,
-            provider: 'guest',
-            role: 'Driver',
-            isAnonymous: true,
-          };
-          onLogin(guest);
-        } else {
-          setError('Invalid Guest ID or Password');
-        }
+      // Check if guest account exists
+      if (guestAccounts[guestId] && guestAccounts[guestId].password === guestPassword) {
+        const guest: AegisAuthUser = {
+          uid: `guest_${guestId}`,
+          displayName: guestAccounts[guestId].name,
+          email: `${guestId}@guest.local`,
+          provider: 'guest',
+          role: 'Driver',
+          isAnonymous: true,
+        };
+        localStorage.setItem('aegis_guest_data', JSON.stringify({
+          guestId,
+          guestName: guestAccounts[guestId].name,
+          guestPassword,
+          profile: {},
+        }));
+        onLogin(guest);
       } else {
-        setError('No guest account found. Please create one.');
+        setError('Invalid Guest ID or Password');
       }
     }
   };
