@@ -1498,7 +1498,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                 { label: 'YOLOv8 Engine', status: 'Ready', color: 'text-cyber-green' },
                 { label: 'Camera Module', status: isWebcamActive ? 'Active' : 'Standby', color: isWebcamActive ? 'text-cyber-green' : 'text-white/40' },
                 { label: 'GPS Module', status: gpsStatus === 'locked' ? 'Locked' : 'Searching', color: gpsStatus === 'locked' ? 'text-cyber-green' : 'text-cyber-orange' },
-                { label: 'IMU Sensor', status: isMoving ? 'Active' : 'Idle', color: isMoving ? 'text-cyber-green' : 'text-white/40' },
+                { label: 'ESP32-CAM', status: esp32Connected ? 'Connected' : 'Disconnected', color: esp32Connected ? 'text-cyber-green' : 'text-white/40' },
                 { label: 'Tracking', status: isTracking ? 'Active' : 'Off', color: isTracking ? 'text-cyber-green' : 'text-white/40' },
                 { label: 'Internet', status: 'Connected', color: 'text-cyber-green' },
               ].map((item, i) => (
