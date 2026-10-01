@@ -11,6 +11,7 @@ import DashboardView from './components/DashboardView';
 import ViolationsView from './components/ViolationsView';
 import AuthModal from './components/AuthModal';
 import ServiceProviderLogin from './components/ServiceProviderLogin';
+import LandingPage from './components/LandingPage';
 import { AegisAuthUser, LOCAL_AUTH_STORAGE_KEY } from './types/auth';
 
 const THEMES = [
@@ -45,6 +46,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState<'dashboard' | 'violations' | 'authority' | 'profile' | 'settings'>('dashboard');
   const [loading, setLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
+  const [showLanding, setShowLanding] = useState(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isServiceProviderOpen, setIsServiceProviderOpen] = useState(false);
   const [showProfilePrompt, setShowProfilePrompt] = useState(false);
@@ -278,6 +280,19 @@ export default function App() {
         />
       </div>
     );
+  }
+
+  // Show Landing Page first
+  if (showLanding) {
+    return <LandingPage onLogin={(user) => {
+      setLocalUser(user);
+      setUserRole(user.role || 'Driver');
+      setShowLanding(false);
+      // Check if profile is complete
+      if (!isProfileComplete()) {
+        setShowProfilePrompt(true);
+      }
+    }} />;
   }
 
   return (
