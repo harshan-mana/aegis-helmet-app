@@ -366,7 +366,7 @@ export default function App() {
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2 }}
             >
-              {currentView === 'dashboard' && <DashboardView />}
+              {currentView === 'dashboard' && <DashboardView userName={effectiveUser?.displayName || undefined} userPhoto={effectiveUser?.photoURL || undefined} onViewChange={setCurrentView} onSignOut={handleSignOut} onLogin={() => setIsAuthModalOpen(true)} />}
               {currentView === 'violations' && <ViolationsView />}
               {currentView === 'authority' && <AuthorityView />}
               {currentView === 'settings' && <SettingsView />}
