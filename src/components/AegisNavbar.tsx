@@ -87,10 +87,12 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
   const [showSwitchAccount, setShowSwitchAccount] = useState(false);
   const [launcherPos, setLauncherPos] = useState({ top: 0, left: 0 });
   const [accountPos, setAccountPos] = useState({ top: 0, left: 0 });
+  const [themePos, setThemePos] = useState({ top: 0, left: 0 });
   const userMenuRef = useRef<HTMLDivElement>(null);
   const themeMenuRef = useRef<HTMLDivElement>(null);
   const avatarRef = useRef<HTMLButtonElement>(null);
   const gridRef = useRef<HTMLButtonElement>(null);
+  const paletteRef = useRef<HTMLButtonElement>(null);
 
   // Save features to localStorage
   useEffect(() => { localStorage.setItem('aegis_features', JSON.stringify(features)); }, [features]);
@@ -130,6 +132,20 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
     }
   }, []);
 
+  // Calculate theme menu position from palette button
+  const updateThemePosition = useCallback(() => {
+    if (paletteRef.current) {
+      const rect = paletteRef.current.getBoundingClientRect();
+      const menuWidth = 192;
+      let left = rect.right - menuWidth;
+      if (left < 8) left = 8;
+      if (left + menuWidth > window.innerWidth - 8) {
+        left = window.innerWidth - menuWidth - 8;
+      }
+      setThemePos({ top: rect.bottom + 8, left });
+    }
+  }, []);
+
   // Toggle launcher
   const toggleLauncher = useCallback(() => {
     if (!launcherOpen) updateLauncherPosition();
@@ -145,6 +161,14 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
     setLauncherOpen(false);
     setCustomizeMode(false);
   }, [showUserMenu, setShowUserMenu, updateAccountPosition]);
+
+  // Toggle theme menu
+  const toggleThemeMenu = useCallback(() => {
+    if (!showThemeMenu) updateThemePosition();
+    setShowThemeMenu?.(!showThemeMenu);
+    setShowUserMenu?.(false);
+    setLauncherOpen(false);
+  }, [showThemeMenu, setShowThemeMenu, setShowUserMenu, updateThemePosition]);
 
   // Close menus when clicking outside
   useEffect(() => {
@@ -495,6 +519,34 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
     );
   };
 
+  // Theme menu via portal
+  const renderThemeMenu = () => {
+    if (!showThemeMenu) return null;
+
+    return createPortal(
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -8 }}
+        transition={{ duration: 0.15 }}
+        className="fixed w-48 bg-[#0d0d0f] border border-white/10 rounded-2xl p-2 shadow-2xl"
+        style={{ top: themePos.top, left: themePos.left, zIndex: 99999 }}
+      >
+        <p className="text-[9px] font-black uppercase tracking-widest text-white/40 px-3 py-2">Choose Theme</p>
+        {THEMES.map((t) => (
+          <button key={t.id} onClick={() => { setCurrentTheme?.(t.id); setShowThemeMenu?.(false); }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold ${
+              currentTheme === t.id ? 'bg-white/10 text-white' : 'text-white/50 hover:bg-white/5 hover:text-white'
+            }`}>
+            <t.icon className={`w-4 h-4 ${t.color}`} />{t.name}
+            {currentTheme === t.id && <div className="w-1.5 h-1.5 rounded-full bg-cyber-blue ml-auto" />}
+          </button>
+        ))}
+      </motion.div>,
+      document.body
+    );
+  };
+
   return (
     <>
       <nav className="relative z-[80] w-full max-w-5xl mx-auto px-4 sm:px-8 pt-6">
@@ -539,29 +591,10 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
             </button>
 
             {/* Theme */}
-            <div ref={themeMenuRef} data-theme-menu className="relative">
-              <button onClick={() => { setShowThemeMenu?.(!showThemeMenu); setShowUserMenu?.(false); setLauncherOpen(false); }}
-                className="p-2.5 bg-white/5 rounded-xl border border-white/10 text-white/50 hover:text-white">
-                <Palette className="w-4 h-4" />
-              </button>
-              <AnimatePresence>
-                {showThemeMenu && (
-                  <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
-                    className="absolute right-0 top-12 w-48 bg-[#0d0d0f] border border-white/10 rounded-2xl p-2 shadow-2xl" style={{ zIndex: 99999 }}>
-                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40 px-3 py-2">Choose Theme</p>
-                    {THEMES.map((t) => (
-                      <button key={t.id} onClick={() => { setCurrentTheme?.(t.id); setShowThemeMenu?.(false); }}
-                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold ${
-                          currentTheme === t.id ? 'bg-white/10 text-white' : 'text-white/50 hover:bg-white/5 hover:text-white'
-                        }`}>
-                        <t.icon className={`w-4 h-4 ${t.color}`} />{t.name}
-                        {currentTheme === t.id && <div className="w-1.5 h-1.5 rounded-full bg-cyber-blue ml-auto" />}
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+            <button ref={paletteRef} onClick={toggleThemeMenu}
+              className="p-2.5 bg-white/5 rounded-xl border border-white/10 text-white/50 hover:text-white">
+              <Palette className="w-4 h-4" />
+            </button>
 
             {/* H Avatar */}
             {userName && (
@@ -605,6 +638,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
       {/* Portal-based dropdowns - rendered to document.body to escape all clipping contexts */}
       <AnimatePresence>{renderLauncher()}</AnimatePresence>
       <AnimatePresence>{renderAccountMenu()}</AnimatePresence>
+      <AnimatePresence>{renderThemeMenu()}</AnimatePresence>
       <AnimatePresence>{renderAddFeatureModal()}</AnimatePresence>
       <AnimatePresence>{renderLogoutConfirm()}</AnimatePresence>
       <AnimatePresence>{renderSwitchAccount()}</AnimatePresence>
