@@ -41,18 +41,14 @@ interface Feature {
 }
 
 const DEFAULT_FEATURES: Feature[] = [
-  { id: 'dashboard', name: 'Dashboard', description: 'Main dashboard', icon: 'gauge', route: 'dashboard', category: 'General', enabled: true, order: 0 },
-  { id: 'violations', name: 'Violations', description: 'Violation monitor', icon: 'alert', route: 'violations', category: 'General', enabled: true, order: 1 },
-  { id: 'authority', name: 'RTO Command', description: 'RTO command center', icon: 'layout', route: 'authority', category: 'General', enabled: true, order: 2 },
-  { id: 'analytics', name: 'Analytics', description: 'Data analytics', icon: 'chart', route: 'authority', category: 'General', enabled: true, order: 3 },
-  { id: 'reports', name: 'Reports', description: 'Generate reports', icon: 'file', route: 'authority', category: 'General', enabled: true, order: 4 },
-  { id: 'alerts', name: 'Alerts', description: 'System alerts', icon: 'bell', route: 'violations', category: 'General', enabled: true, order: 5 },
-  { id: 'users', name: 'Users', description: 'User management', icon: 'users', route: 'settings', category: 'General', enabled: true, order: 6 },
-  { id: 'vehicles', name: 'Vehicles', description: 'Vehicle registry', icon: 'car', route: 'authority', category: 'General', enabled: true, order: 7 },
-  { id: 'documents', name: 'Documents', description: 'Document management', icon: 'file', route: 'settings', category: 'General', enabled: true, order: 8 },
-  { id: 'ai', name: 'AI Assistant', description: 'AI helper', icon: 'bot', route: 'dashboard', category: 'General', enabled: true, order: 9 },
-  { id: 'monitor', name: 'System Monitor', description: 'System status', icon: 'monitor', route: 'settings', category: 'General', enabled: true, order: 10 },
-  { id: 'settings', name: 'Settings', description: 'System settings', icon: 'settings', route: 'settings', category: 'General', enabled: true, order: 11 },
+  { id: 'analytics', name: 'Analytics', description: 'Data analytics', icon: 'chart', route: 'authority', category: 'General', enabled: true, order: 0 },
+  { id: 'reports', name: 'Reports', description: 'Generate reports', icon: 'file', route: 'authority', category: 'General', enabled: true, order: 1 },
+  { id: 'alerts', name: 'Alerts', description: 'System alerts', icon: 'bell', route: 'violations', category: 'General', enabled: true, order: 2 },
+  { id: 'users', name: 'Users', description: 'User management', icon: 'users', route: 'settings', category: 'General', enabled: true, order: 3 },
+  { id: 'vehicles', name: 'Vehicles', description: 'Vehicle registry', icon: 'car', route: 'authority', category: 'General', enabled: true, order: 4 },
+  { id: 'documents', name: 'Documents', description: 'Document management', icon: 'file', route: 'settings', category: 'General', enabled: true, order: 5 },
+  { id: 'ai', name: 'AI Assistant', description: 'AI helper', icon: 'bot', route: 'dashboard', category: 'General', enabled: true, order: 6 },
+  { id: 'monitor', name: 'System Monitor', description: 'System status', icon: 'monitor', route: 'settings', category: 'General', enabled: true, order: 7 },
 ];
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -78,7 +74,8 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
   const [features, setFeatures] = useState<Feature[]>(() => {
     try {
       const saved = localStorage.getItem('aegis_features');
-      return saved ? JSON.parse(saved) : DEFAULT_FEATURES;
+      const parsed = saved ? JSON.parse(saved) : DEFAULT_FEATURES;
+      return parsed.filter(f => !['dashboard', 'violations', 'authority', 'settings'].includes(f.id));
     } catch { return DEFAULT_FEATURES; }
   });
   const [showAddFeature, setShowAddFeature] = useState(false);
