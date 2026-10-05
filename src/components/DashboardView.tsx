@@ -165,31 +165,6 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     return () => clearInterval(interval);
   }, []);
 
-  // IMU Accelerometer simulator
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const moving = Math.random() > 0.3;
-      setIsMoving(moving);
-
-      if (moving) {
-        const ax = parseFloat(((Math.random() - 0.5) * 2).toFixed(2));
-        const ay = parseFloat(((Math.random() - 0.5) * 2).toFixed(2));
-        const az = parseFloat((1 + (Math.random() - 0.5) * 0.5).toFixed(2));
-        setAccelX(ax);
-        setAccelY(ay);
-        setAccelZ(az);
-        const g = parseFloat(Math.sqrt(ax * ax + ay * ay + az * az).toFixed(2));
-        setGForce(g);
-      } else {
-        setAccelX(0);
-        setAccelY(0);
-        setAccelZ(0);
-        setGForce(0);
-      }
-    }, 800);
-    return () => clearInterval(interval);
-  }, []);
-
   // GPS tracker
   useEffect(() => {
     if (!navigator.geolocation) {
