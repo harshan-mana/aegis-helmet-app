@@ -255,18 +255,18 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: -8, scale: 0.95 }}
         transition={{ duration: 0.15 }}
-        className="fixed w-[480px] max-w-[calc(100vw-16px)] bg-[#0d0d0f] border border-white/10 rounded-3xl shadow-[0_0_60px_rgba(255,107,53,0.15)] overflow-hidden"
+        className="fixed w-[480px] max-w-[calc(100vw-16px)] bg-[#1a1a1d] border border-white/10 rounded-[28px] shadow-[0_20px_60px_rgba(0,0,0,0.6)] overflow-hidden"
         style={{ top: launcherPos.top, left: launcherPos.left, zIndex: 99999, maxHeight: 'calc(100vh - 120px)' }}
       >
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-white/10">
-          <h3 className="text-sm font-black uppercase tracking-widest text-white">
-            {customizeMode ? 'Customize AEGIS' : 'AEGIS Features'}
+          <h3 className="text-lg font-bold text-white/90">
+            {customizeMode ? 'Customize AEGIS' : 'Your favorites'}
           </h3>
           <div className="flex items-center gap-2">
             {!customizeMode && (
-              <button onClick={() => setCustomizeMode(true)} className="p-1.5 text-white/40 hover:text-white rounded-lg hover:bg-white/5" aria-label="Customize features">
-                <Pencil className="w-4 h-4" />
+              <button onClick={() => setCustomizeMode(true)} className="p-2 text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-all" aria-label="Customize features">
+                <Pencil className="w-5 h-5" />
               </button>
             )}
             {customizeMode && (
@@ -298,16 +298,24 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-3 gap-3">
-              {features.filter(f => f.enabled).map((f) => {
+            <div className="grid grid-cols-4 gap-4">
+              {features.filter(f => f.enabled).map((f, idx) => {
                 const Icon = getIcon(f.icon);
+                const palette = [
+                  'from-rose-500/30 to-rose-600/20',
+                  'from-emerald-500/30 to-emerald-600/20',
+                  'from-blue-500/30 to-blue-600/20',
+                  'from-amber-500/30 to-amber-600/20',
+                  'from-purple-500/30 to-purple-600/20',
+                  'from-cyan-500/30 to-cyan-600/20',
+                ][idx % 6];
                 return (
                   <button key={f.id} onClick={() => handleFeatureClick(f.route)}
-                    className="flex flex-col items-center gap-2 p-3 rounded-xl hover:bg-white/5 transition-all group">
-                    <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center group-hover:bg-cyber-blue/10 transition-all">
-                      <Icon className="w-5 h-5 text-white/70 group-hover:text-cyber-blue transition-all" />
+                    className="flex flex-col items-center gap-2 p-2 rounded-2xl hover:bg-white/5 transition-all group">
+                    <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${palette} border border-white/10 flex items-center justify-center group-hover:scale-105 transition-all`}>
+                      <Icon className="w-7 h-7 text-white" />
                     </div>
-                    <span className="text-[10px] font-bold text-white/70 group-hover:text-white text-center leading-tight">{f.name}</span>
+                    <span className="text-[11px] font-semibold text-white/80 group-hover:text-white text-center leading-tight">{f.name}</span>
                   </button>
                 );
               })}
