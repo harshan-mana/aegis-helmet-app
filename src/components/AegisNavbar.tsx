@@ -178,7 +178,9 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
       const target = e.target as HTMLElement;
       if (!target.closest('[data-account-menu]')) setShowUserMenu?.(false);
       if (!target.closest('[data-theme-menu]')) setShowThemeMenu?.(false);
-      if (!target.closest('[data-launcher]')) { setLauncherOpen(false); setCustomizeMode(false); }
+      const isInsideLauncher = target.closest('[data-launcher]') !== null;
+      const isInsideGridButton = gridRef.current !== null && gridRef.current.contains(target);
+      if (!isInsideLauncher && !isInsideGridButton) { setLauncherOpen(false); setCustomizeMode(false); }
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
@@ -640,7 +642,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
       </nav>
 
       {/* Portal-based dropdowns - rendered to document.body to escape all clipping contexts */}
-      <AnimatePresence>{renderLauncher()}</AnimatePresence>
+      {renderLauncher()}
       <AnimatePresence>{renderAccountMenu()}</AnimatePresence>
       <AnimatePresence>{renderThemeMenu()}</AnimatePresence>
       <AnimatePresence>{renderAddFeatureModal()}</AnimatePresence>
