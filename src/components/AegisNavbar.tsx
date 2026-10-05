@@ -84,12 +84,9 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
   const [showSwitchAccount, setShowSwitchAccount] = useState(false);
   const [launcherPos, setLauncherPos] = useState({ top: 0, left: 0 });
   const [accountPos, setAccountPos] = useState({ top: 0, left: 0 });
-  const [themePos, setThemePos] = useState({ top: 0, left: 0 });
   const userMenuRef = useRef<HTMLDivElement>(null);
-  const themeMenuRef = useRef<HTMLDivElement>(null);
   const avatarRef = useRef<HTMLButtonElement>(null);
   const gridRef = useRef<HTMLButtonElement>(null);
-  const paletteRef = useRef<HTMLButtonElement>(null);
 
   // Save features to localStorage
   useEffect(() => { localStorage.setItem('aegis_features', JSON.stringify(features)); }, [features]);
@@ -129,72 +126,46 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
     }
   }, []);
 
-  // Calculate theme menu position from palette button
-  const updateThemePosition = useCallback(() => {
-    if (paletteRef.current) {
-      const rect = paletteRef.current.getBoundingClientRect();
-      const menuWidth = 192;
-      let left = rect.right - menuWidth;
-      if (left < 8) left = 8;
-      if (left + menuWidth > window.innerWidth - 8) {
-        left = window.innerWidth - menuWidth - 8;
-      }
-      setThemePos({ top: rect.bottom + 8, left });
-    }
-  }, []);
-
   // Toggle launcher
   const toggleLauncher = useCallback(() => {
     if (!launcherOpen) updateLauncherPosition();
     setLauncherOpen(!launcherOpen);
     setShowUserMenu?.(false);
-    setShowThemeMenu?.(false);
     setCustomizeMode(false);
-  }, [launcherOpen, setShowUserMenu, setShowThemeMenu, updateLauncherPosition]);
+  }, [launcherOpen, setShowUserMenu, updateLauncherPosition]);
 
   // Toggle account menu
   const toggleAccountMenu = useCallback(() => {
     if (!showUserMenu) updateAccountPosition();
     setShowUserMenu?.(!showUserMenu);
     setLauncherOpen(false);
-    setShowThemeMenu?.(false);
     setCustomizeMode(false);
-  }, [showUserMenu, setShowUserMenu, setShowThemeMenu, updateAccountPosition]);
-
-  // Toggle theme menu
-  const toggleThemeMenu = useCallback(() => {
-    if (!showThemeMenu) updateThemePosition();
-    setShowThemeMenu?.(!showThemeMenu);
-    setShowUserMenu?.(false);
-    setLauncherOpen(false);
-  }, [showThemeMenu, setShowThemeMenu, setShowUserMenu, updateThemePosition]);
+  }, [showUserMenu, setShowUserMenu, updateAccountPosition]);
 
   // Close menus when clicking outside
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target.closest('[data-account-menu]')) setShowUserMenu?.(false);
-      if (!target.closest('[data-theme-menu]')) setShowThemeMenu?.(false);
       const isInsideLauncher = target.closest('[data-launcher]') !== null;
       const isInsideGridButton = gridRef.current !== null && gridRef.current.contains(target);
       if (!isInsideLauncher && !isInsideGridButton) { setLauncherOpen(false); setCustomizeMode(false); }
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [setShowUserMenu, setShowThemeMenu]);
+  }, [setShowUserMenu]);
 
   // Close on Escape
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setShowUserMenu?.(false); setLauncherOpen(false); setCustomizeMode(false);
-        setShowThemeMenu?.(false);
         setShowLogoutConfirm(false); setShowSwitchAccount(false); setShowAddFeature(false);
       }
     };
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [setShowUserMenu, setShowThemeMenu]);
+  }, [setShowUserMenu]);
 
   // Update position on resize
   useEffect(() => {
@@ -371,25 +342,32 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
                 <span className="text-sm font-black text-white">{(userName || 'U').charAt(0).toUpperCase()}</span>
               </div>}
             <div><p className="text-sm font-bold text-white truncate">{userName || 'User'}</p>
-              <p className="text-[10px] text-white/40 truncate">harshan@example.com</p></div>
+              <p className="text-[10px] text-white/40 truncate">{auth.currentUser?.email || 'Local guest account'}</p></div>
           </div>
         </div>
         <div className="p-2">
+          <button onClick={() => { onLogin?.(); setShowUserMenu?.(false); }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-white/70 hover:bg-white/5 hover:text-white">
+            <Plus className="w-4 h-4" />Add another account
+          </button>
           <button onClick={handleSwitchAccount} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-white/70 hover:bg-white/5 hover:text-white">
             <Users className="w-4 h-4" />Switch account
           </button>
           <button onClick={() => { onViewChange('settings'); setShowUserMenu?.(false); }}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-white/70 hover:bg-white/5 hover:text-white">
-            <Settings className="w-4 h-4" />Account settings
+            <Settings className="w-4 h-4" />Manage Account
           </button>
-          <button onClick={() => setShowUserMenu?.(false)}
+          <button onClick={() => { onViewChange('settings'); setShowUserMenu?.(false); }}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-white/70 hover:bg-white/5 hover:text-white">
             <Bell className="w-4 h-4" />Notifications
           </button>
           <button onClick={() => setShowLogoutConfirm(true)}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-cyber-red hover:bg-cyber-red/10">
-            <LogOutIcon className="w-4 h-4" />Log out
+            <LogOutIcon className="w-4 h-4" />Sign out
           </button>
+        </div>
+        <div className="px-4 py-3 border-t border-white/10 flex items-center justify-between text-[9px] text-white/30">
+          <span>Privacy Policy</span>
+          <span>Terms of Service</span>
         </div>
       </motion.div>,
       document.body
@@ -529,34 +507,6 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
     );
   };
 
-  // Theme menu via portal
-  const renderThemeMenu = () => {
-    if (!showThemeMenu) return null;
-
-    return createPortal(
-      <motion.div
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -8 }}
-        transition={{ duration: 0.15 }}
-        className="fixed w-48 bg-[#0d0d0f] border border-white/10 rounded-2xl p-2 shadow-2xl"
-        style={{ top: themePos.top, left: themePos.left, zIndex: 99999 }}
-      >
-        <p className="text-[9px] font-black uppercase tracking-widest text-white/40 px-3 py-2">Choose Theme</p>
-        {THEMES.map((t) => (
-          <button key={t.id} onClick={() => { setCurrentTheme?.(t.id); setShowThemeMenu?.(false); }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold ${
-              currentTheme === t.id ? 'bg-white/10 text-white' : 'text-white/50 hover:bg-white/5 hover:text-white'
-            }`}>
-            <t.icon className={`w-4 h-4 ${t.color}`} />{t.name}
-            {currentTheme === t.id && <div className="w-1.5 h-1.5 rounded-full bg-cyber-blue ml-auto" />}
-          </button>
-        ))}
-      </motion.div>,
-      document.body
-    );
-  };
-
   return (
     <>
       <nav className="relative z-[80] w-full max-w-5xl mx-auto px-4 sm:px-8 pt-6">
@@ -595,12 +545,8 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
           {/* Utility Controls */}
           <div className="flex items-center gap-3 relative z-10">
             <button ref={gridRef} onClick={toggleLauncher} aria-label="Open feature launcher"
-              className="p-2.5 bg-white/5 rounded-xl border border-white/10 text-white/50 hover:text-white transition-all">
-              <Grid3x3 className="w-4 h-4" />
-            </button>
-            <button ref={paletteRef} onClick={toggleThemeMenu} aria-label="Open theme menu"
-              className="p-2.5 bg-white/5 rounded-xl border border-white/10 text-white/50 hover:text-white transition-all">
-              <Palette className="w-4 h-4" />
+              className="w-10 h-10 rounded-2xl bg-cyber-blue text-black shadow-[0_0_20px_#FF6B35] hover:scale-105 transition-all flex items-center justify-center">
+              <Grid3x3 className="w-5 h-5 text-black" />
             </button>
             <button ref={avatarRef} onClick={toggleAccountMenu} aria-label="Open account menu"
               className="flex items-center gap-2 pl-1 pr-2 py-1 bg-white/5 border border-white/10 rounded-full hover:bg-white/10">
@@ -641,7 +587,6 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
       {/* Portal-based dropdowns - rendered to document.body to escape all clipping contexts */}
       {renderLauncher()}
       <AnimatePresence>{renderAccountMenu()}</AnimatePresence>
-      <AnimatePresence>{renderThemeMenu()}</AnimatePresence>
       <AnimatePresence>{renderAddFeatureModal()}</AnimatePresence>
       <AnimatePresence>{renderLogoutConfirm()}</AnimatePresence>
       <AnimatePresence>{renderSwitchAccount()}</AnimatePresence>
