@@ -151,16 +151,18 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
     if (!launcherOpen) updateLauncherPosition();
     setLauncherOpen(!launcherOpen);
     setShowUserMenu?.(false);
+    setShowThemeMenu?.(false);
     setCustomizeMode(false);
-  }, [launcherOpen, setShowUserMenu, updateLauncherPosition]);
+  }, [launcherOpen, setShowUserMenu, setShowThemeMenu, updateLauncherPosition]);
 
   // Toggle account menu
   const toggleAccountMenu = useCallback(() => {
     if (!showUserMenu) updateAccountPosition();
     setShowUserMenu?.(!showUserMenu);
     setLauncherOpen(false);
+    setShowThemeMenu?.(false);
     setCustomizeMode(false);
-  }, [showUserMenu, setShowUserMenu, updateAccountPosition]);
+  }, [showUserMenu, setShowUserMenu, setShowThemeMenu, updateAccountPosition]);
 
   // Toggle theme menu
   const toggleThemeMenu = useCallback(() => {
@@ -187,12 +189,13 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setShowUserMenu?.(false); setLauncherOpen(false); setCustomizeMode(false);
+        setShowThemeMenu?.(false);
         setShowLogoutConfirm(false); setShowSwitchAccount(false); setShowAddFeature(false);
       }
     };
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [setShowUserMenu]);
+  }, [setShowUserMenu, setShowThemeMenu]);
 
   // Update position on resize
   useEffect(() => {
@@ -588,6 +591,26 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
                 <item.icon className="w-4 h-4" />{item.label}
               </button>
             ))}
+          </div>
+
+          {/* Utility Controls */}
+          <div className="flex items-center gap-3 relative z-10">
+            <button ref={gridRef} onClick={toggleLauncher} aria-label="Open feature launcher"
+              className="p-2.5 bg-white/5 rounded-xl border border-white/10 text-white/50 hover:text-white transition-all">
+              <Grid3x3 className="w-4 h-4" />
+            </button>
+            <button ref={paletteRef} onClick={toggleThemeMenu} aria-label="Open theme menu"
+              className="p-2.5 bg-white/5 rounded-xl border border-white/10 text-white/50 hover:text-white transition-all">
+              <Palette className="w-4 h-4" />
+            </button>
+            <button ref={avatarRef} onClick={toggleAccountMenu} aria-label="Open account menu"
+              className="flex items-center gap-2 pl-1 pr-2 py-1 bg-white/5 border border-white/10 rounded-full hover:bg-white/10">
+              {userPhoto ? <img src={userPhoto} alt={userName || 'User'} className="w-7 h-7 rounded-full object-cover" /> :
+                <div className="w-7 h-7 rounded-full bg-pink-500 flex items-center justify-center">
+                  <span className="text-xs font-black text-white">{(userName || 'H').charAt(0).toUpperCase()}</span>
+                </div>}
+              <ChevronDown className={`w-3 h-3 text-white/40 ${showUserMenu ? 'rotate-180' : ''}`} />
+            </button>
           </div>
 
           {/* Mobile Menu */}
