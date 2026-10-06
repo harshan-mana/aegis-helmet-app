@@ -149,7 +149,8 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (!target.closest('[data-account-menu]')) setShowUserMenu?.(false);
+      const insideAccount = target.closest('[data-account-menu]') !== null || (avatarRef.current !== null && avatarRef.current.contains(target));
+      if (!insideAccount) setShowUserMenu?.(false);
       const isInsideLauncher = target.closest('[data-launcher]') !== null;
       const isInsideGridButton = gridRef.current !== null && gridRef.current.contains(target);
       if (!isInsideLauncher && !isInsideGridButton) { setLauncherOpen(false); setCustomizeMode(false); }
@@ -328,6 +329,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
 
     return createPortal(
       <motion.div
+        data-account-menu
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -8 }}
@@ -516,14 +518,15 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
               className="w-24 h-full bg-gradient-to-r from-transparent via-cyber-blue to-transparent skew-x-12" />
           </div>
 
-          {/* Logo */}
+          {/* Logo + Launcher trigger */}
           <div className="flex items-center gap-3.5 relative z-10">
-            <div className="p-2.5 bg-cyber-blue rounded-2xl shadow-[0_0_20px_#FF6B35] group-hover:scale-105 transition-transform flex items-center justify-center">
+            <button ref={gridRef} onClick={toggleLauncher} aria-label="Open feature launcher"
+              className="p-2.5 bg-cyber-blue rounded-2xl shadow-[0_0_20px_#FF6B35] hover:scale-105 transition-transform flex items-center justify-center">
               <Shield className="w-5 h-5 text-black" />
-            </div>
+            </button>
             <div>
-              <span className="text-sm font-display font-black tracking-[0.25em] text-white">AEGIS AI</span>
-              <div className="flex items-center gap-1.5">
+              <span className="text-xl font-display font-black tracking-[0.28em] text-white drop-shadow">AEGIS AI</span>
+              <div className="flex items-center gap-1.5 mt-0.5">
                 <div className="w-1.5 h-1.5 rounded-full bg-cyber-green animate-pulse" />
                 <span className="text-[9px] font-mono text-cyber-blue/80 uppercase tracking-widest">v2.5</span>
               </div>
@@ -544,10 +547,6 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
 
           {/* Utility Controls */}
           <div className="flex items-center gap-3 relative z-10">
-            <button ref={gridRef} onClick={toggleLauncher} aria-label="Open feature launcher"
-              className="w-10 h-10 rounded-2xl bg-cyber-blue text-black shadow-[0_0_20px_#FF6B35] hover:scale-105 transition-all flex items-center justify-center">
-              <Shield className="w-5 h-5 text-black" />
-            </button>
             <button ref={avatarRef} onClick={toggleAccountMenu} aria-label="Open account menu"
               className="flex items-center gap-2 pl-1 pr-2 py-1 bg-white/5 border border-white/10 rounded-full hover:bg-white/10">
               {userPhoto ? <img src={userPhoto} alt={userName || 'User'} className="w-7 h-7 rounded-full object-cover" /> :
@@ -586,7 +585,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
 
       {/* Portal-based dropdowns - rendered to document.body to escape all clipping contexts */}
       {renderLauncher()}
-      <AnimatePresence>{renderAccountMenu()}</AnimatePresence>
+      {renderAccountMenu()}
       <AnimatePresence>{renderAddFeatureModal()}</AnimatePresence>
       <AnimatePresence>{renderLogoutConfirm()}</AnimatePresence>
       <AnimatePresence>{renderSwitchAccount()}</AnimatePresence>
