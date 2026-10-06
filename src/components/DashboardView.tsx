@@ -45,6 +45,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as Dialog from '@radix-ui/react-dialog';
+import * as tf from '@tensorflow/tfjs';
+import * as cocoSsd from '@tensorflow-models/coco-ssd';
 
 interface EmergencyContact {
   id: string;
@@ -134,6 +136,14 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   const [detectedObjects, setDetectedObjects] = useState<string[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
   const [detectionConfidence, setDetectionConfidence] = useState(0);
+  const detectCanvasRef = useRef<HTMLCanvasElement>(null);
+  const modelRef = useRef<cocoSsd.ObjectDetection | null>(null);
+  const [modelReady, setModelReady] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const lastPredictionsRef = useRef<cocoSsd.DetectedObject[]>([]);
+  const lastClassesRef = useRef<string>('');
+  const lastInferRef = useRef(0);
+  const rafRef = useRef(0);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
 
   // Feature 1: Detected vehicles with license plates
@@ -354,35 +364,102 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     setTrackingData([]);
   }, []);
 
-  // YOLOv8-style object detection simulation with improved accuracy
-  const runDetection = useCallback(async () => {
-    if (!isWebcamActive) return;
-    setIsDetecting(true);
+  // Load COCO-SSD model once
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await tf.ready();
+        const m = await cocoSsd.load();
+        if (!cancelled) {
+          modelRef.current = m;
+          setModelReady(true);
+        }
+      } catch {
+        if (!cancelled) setModelError('Object detection model failed to load.');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
-    // Simulate realistic processing time (100-300ms like real YOLOv8)
-    await new Promise((r) => setTimeout(r, 100 + Math.random() * 200));
-
-    // More realistic detection scenarios with confidence scores
-    const detectionScenarios = [
-      { objects: ['helmet', 'person', 'motorcycle'], confidence: 0.92 + Math.random() * 0.07 },
-      { objects: ['no_helmet', 'person', 'motorcycle'], confidence: 0.88 + Math.random() * 0.1 },
-      { objects: ['person', 'person', 'motorcycle', 'person'], confidence: 0.85 + Math.random() * 0.12 },
-      { objects: ['license_plate', 'motorcycle', 'person', 'helmet'], confidence: 0.9 + Math.random() * 0.08 },
-      { objects: ['helmet', 'person', 'car', 'license_plate'], confidence: 0.93 + Math.random() * 0.06 },
-      { objects: ['no_helmet', 'person', 'person', 'scooter'], confidence: 0.87 + Math.random() * 0.1 },
-    ];
-    const scenario = detectionScenarios[Math.floor(Math.random() * detectionScenarios.length)];
-    setDetectedObjects(scenario.objects);
-    setDetectionConfidence(scenario.confidence);
-    setIsDetecting(false);
+  // Stop camera cleanup for detection canvas
+  useEffect(() => {
+    if (!isWebcamActive) {
+      const c = detectCanvasRef.current;
+      const ctx = c?.getContext('2d');
+      if (c && ctx) ctx.clearRect(0, 0, c.width, c.height);
+      lastPredictionsRef.current = [];
+    }
   }, [isWebcamActive]);
 
-  // Auto-detection loop
+  // Real COCO-SSD detection loop (approx. 4 detections/sec; video stays smooth)
   useEffect(() => {
-    if (!detectionActive || !isWebcamActive) return;
-    const interval = setInterval(runDetection, 3000);
-    return () => clearInterval(interval);
-  }, [detectionActive, isWebcamActive, runDetection]);
+    if (!detectionActive || !isWebcamActive || !modelReady) return;
+    let active = true;
+
+    const loop = async (t: number) => {
+      if (!active) return;
+      rafRef.current = requestAnimationFrame(loop);
+      const v = videoRef.current;
+      const c = detectCanvasRef.current;
+      if (!v || !c || !modelRef.current) return;
+      if (v.readyState >= 2 && v.videoWidth > 0) {
+        if (t - lastInferRef.current >= 250) {
+          lastInferRef.current = t;
+          setIsDetecting(true);
+          try {
+            const preds = await modelRef.current.detect(v);
+            const filtered = preds.filter((p) => p.score >= 0.5);
+            lastPredictionsRef.current = filtered;
+            const classes = filtered.map((p) => p.class).join(',');
+            if (classes !== lastClassesRef.current) {
+              lastClassesRef.current = classes;
+              setDetectedObjects(filtered.map((p) => p.class));
+            }
+            setDetectionConfidence(filtered.length ? Math.round(Math.max(...filtered.map((p) => p.score)) * 100) : 0);
+          } catch {
+            // skip frame
+          } finally {
+            setIsDetecting(false);
+          }
+        }
+        // Draw latest boxes (scaled from video intrinsic size to displayed size)
+        const ctx = c.getContext('2d');
+        if (ctx) {
+          if (c.width !== c.clientWidth) c.width = c.clientWidth;
+          if (c.height !== c.clientHeight) c.height = c.clientHeight;
+          ctx.clearRect(0, 0, c.width, c.height);
+          const sx = c.width / v.videoWidth;
+          const sy = c.height / v.videoHeight;
+          for (const p of lastPredictionsRef.current) {
+            const [x, y, w, h] = p.bbox;
+            ctx.strokeStyle = '#FF6B35';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x * sx, y * sy, w * sx, h * sy);
+            const label = `${p.class} • ${Math.round(p.score * 100)}%`;
+            ctx.font = 'bold 12px monospace';
+            const tw = ctx.measureText(label).width;
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            ctx.fillRect(x * sx, Math.max(0, y * sy - 18), tw + 6, 16);
+            ctx.fillStyle = '#fff';
+            ctx.fillText(label, x * sx + 3, Math.max(12, y * sy - 5));
+          }
+        }
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(loop);
+    return () => {
+      active = false;
+      cancelAnimationFrame(rafRef.current);
+      const c = detectCanvasRef.current;
+      const ctx = c?.getContext('2d');
+      if (c && ctx) ctx.clearRect(0, 0, c.width, c.height);
+      lastPredictionsRef.current = [];
+      lastClassesRef.current = '';
+    };
+  }, [detectionActive, isWebcamActive, modelReady]);
+
 
   // Save contacts to localStorage
   useEffect(() => {
@@ -696,6 +773,10 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
               className={`w-full h-full object-cover ${isWebcamActive ? 'block' : 'hidden'}`}
             />
             <canvas ref={canvasRef} className="hidden" />
+            <canvas
+              ref={detectCanvasRef}
+              className={`absolute inset-0 w-full h-full object-cover pointer-events-none ${isWebcamActive ? 'block' : 'hidden'}`}
+            />
 
             {/* Detection overlay - only when active */}
             {isWebcamActive && detectionActive && (
