@@ -518,8 +518,8 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
 
           {/* Centered title */}
           <div className="flex items-center gap-2 relative z-10">
-            <span className="text-[20px] font-display font-black tracking-[0.2em] text-white leading-none">AEGIS AI</span>
-            <span className="text-[20px] font-display font-black tracking-[0.2em] text-cyber-blue/80 uppercase leading-none">V2.5</span>
+            <span className="text-[40px] font-display font-black tracking-[0.2em] text-white leading-none">AEGIS AI</span>
+            <span className="text-[40px] font-display font-black tracking-[0.2em] text-cyber-blue/80 uppercase leading-none">V2.5</span>
           </div>
 
           {/* Right-side controls: Shield (launcher) + Settings + H account */}
