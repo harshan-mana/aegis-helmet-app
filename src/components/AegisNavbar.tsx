@@ -518,30 +518,27 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
 
           {/* Centered title */}
           <div className="flex items-center gap-2 relative z-10">
-            <span className="text-[40px] font-display font-black tracking-[0.2em] text-white leading-none">AEGIS AI</span>
-            <span className="text-[40px] font-display font-black tracking-[0.2em] text-cyber-blue/80 uppercase leading-none">V2.5</span>
+            <span className="text-[60px] font-display font-black tracking-[0.2em] text-white leading-none">AEGIS AI</span>
+            <span className="text-[60px] font-display font-black tracking-[0.2em] text-cyber-blue/80 uppercase leading-none">V2.5</span>
           </div>
 
           {/* Right-side controls: Shield (launcher) + Settings + H account */}
-          <div className="flex items-center justify-end gap-3 relative z-10">
+          <div className="flex items-center justify-end gap-3 relative z-10 mt-5 -mr-2 sm:mt-6">
             <button ref={gridRef} onClick={toggleLauncher} aria-label="Open feature launcher"
-              className="p-2.5 bg-cyber-blue rounded-2xl shadow-[0_0_20px_#FF6B35] hover:scale-105 transition-transform flex items-center justify-center">
+              className="w-10 h-10 bg-cyber-blue rounded-2xl shadow-[0_0_20px_#FF6B35] hover:scale-105 transition-transform flex items-center justify-center">
               <Shield className="w-5 h-5 text-black" />
             </button>
             <button onClick={() => onViewChange('settings')} aria-label="Open settings"
-              className="p-2.5 bg-white/5 rounded-xl border border-white/10 text-white/50 hover:text-white transition-all">
+              className="w-10 h-10 bg-white/5 rounded-xl border border-white/10 text-white/50 hover:text-white transition-all flex items-center justify-center">
               <Settings className="w-5 h-5" />
             </button>
-            <button className="md:hidden p-2 text-white/50 hover:text-white" onClick={() => setIsMenuOpen(!isMenuOpen)}>
+            <button className="md:hidden w-10 h-10 text-white/50 hover:text-white flex items-center justify-center" onClick={() => setIsMenuOpen(!isMenuOpen)}>
               {isMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
             <button ref={avatarRef} onClick={toggleAccountMenu} aria-label="Open account menu"
-              className="flex items-center gap-2 pl-1 pr-2 py-1 bg-white/5 border border-white/10 rounded-full hover:bg-white/10">
+              className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10">
               {userPhoto ? <img src={userPhoto} alt={userName || 'User'} className="w-7 h-7 rounded-full object-cover" /> :
-                <div className="w-7 h-7 rounded-full bg-pink-500 flex items-center justify-center">
-                  <span className="text-xs font-black text-white">{(userName || 'H').charAt(0).toUpperCase()}</span>
-                </div>}
-              <ChevronDown className={`w-3 h-3 text-white/40 ${showUserMenu ? 'rotate-180' : ''}`} />
+                <span className="w-7 h-7 rounded-full bg-pink-500 flex items-center justify-center text-xs font-black text-white">{(userName || 'H').charAt(0).toUpperCase()}</span>}
             </button>
           </div>
 
