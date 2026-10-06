@@ -41,14 +41,17 @@ interface Feature {
 }
 
 const DEFAULT_FEATURES: Feature[] = [
-  { id: 'analytics', name: 'Analytics', description: 'Data analytics', icon: 'chart', route: 'authority', category: 'General', enabled: true, order: 0 },
-  { id: 'reports', name: 'Reports', description: 'Generate reports', icon: 'file', route: 'authority', category: 'General', enabled: true, order: 1 },
-  { id: 'alerts', name: 'Alerts', description: 'System alerts', icon: 'bell', route: 'violations', category: 'General', enabled: true, order: 2 },
-  { id: 'users', name: 'Users', description: 'User management', icon: 'users', route: 'settings', category: 'General', enabled: true, order: 3 },
-  { id: 'vehicles', name: 'Vehicles', description: 'Vehicle registry', icon: 'car', route: 'authority', category: 'General', enabled: true, order: 4 },
-  { id: 'documents', name: 'Documents', description: 'Document management', icon: 'file', route: 'settings', category: 'General', enabled: true, order: 5 },
-  { id: 'ai', name: 'AI Assistant', description: 'AI helper', icon: 'bot', route: 'dashboard', category: 'General', enabled: true, order: 6 },
-  { id: 'monitor', name: 'System Monitor', description: 'System status', icon: 'monitor', route: 'settings', category: 'General', enabled: true, order: 7 },
+  { id: 'dashboard', name: 'Dashboard', description: 'Main dashboard', icon: 'gauge', route: 'dashboard', category: 'General', enabled: true, order: 0 },
+  { id: 'violations', name: 'Violations', description: 'Violation monitor', icon: 'alert', route: 'violations', category: 'General', enabled: true, order: 1 },
+  { id: 'authority', name: 'RTO Command', description: 'RTO command center', icon: 'layout', route: 'authority', category: 'General', enabled: true, order: 2 },
+  { id: 'analytics', name: 'Analytics', description: 'Data analytics', icon: 'chart', route: 'authority', category: 'General', enabled: true, order: 3 },
+  { id: 'reports', name: 'Reports', description: 'Generate reports', icon: 'file', route: 'authority', category: 'General', enabled: true, order: 4 },
+  { id: 'alerts', name: 'Alerts', description: 'System alerts', icon: 'bell', route: 'violations', category: 'General', enabled: true, order: 5 },
+  { id: 'users', name: 'Users', description: 'User management', icon: 'users', route: 'settings', category: 'General', enabled: true, order: 6 },
+  { id: 'vehicles', name: 'Vehicles', description: 'Vehicle registry', icon: 'car', route: 'authority', category: 'General', enabled: true, order: 7 },
+  { id: 'documents', name: 'Documents', description: 'Document management', icon: 'file', route: 'settings', category: 'General', enabled: true, order: 8 },
+  { id: 'ai', name: 'AI Assistant', description: 'AI helper', icon: 'bot', route: 'dashboard', category: 'General', enabled: true, order: 9 },
+  { id: 'monitor', name: 'System Monitor', description: 'System status', icon: 'monitor', route: 'settings', category: 'General', enabled: true, order: 10 },
 ];
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -75,7 +78,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
     try {
       const saved = localStorage.getItem('aegis_features');
       const parsed = saved ? JSON.parse(saved) : DEFAULT_FEATURES;
-      return parsed.filter(f => !['dashboard', 'violations', 'authority', 'settings'].includes(f.id));
+      return parsed.filter(f => f.id !== 'settings');
     } catch { return DEFAULT_FEATURES; }
   });
   const [showAddFeature, setShowAddFeature] = useState(false);
@@ -174,9 +177,6 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
   }, [updateLauncherPosition]);
 
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: Gauge, color: 'text-blue-500' },
-    { id: 'violations', label: 'Violations', icon: AlertTriangle, color: 'text-red-500' },
-    { id: 'authority', label: 'RTO Command', icon: LayoutDashboard, color: 'text-green-500' },
     { id: 'settings', label: 'Settings', icon: Settings, color: 'text-gray-500' },
   ];
 
@@ -546,7 +546,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
           <div className="flex items-center gap-3 relative z-10">
             <button ref={gridRef} onClick={toggleLauncher} aria-label="Open feature launcher"
               className="w-10 h-10 rounded-2xl bg-cyber-blue text-black shadow-[0_0_20px_#FF6B35] hover:scale-105 transition-all flex items-center justify-center">
-              <Grid3x3 className="w-5 h-5 text-black" />
+              <Shield className="w-5 h-5 text-black" />
             </button>
             <button ref={avatarRef} onClick={toggleAccountMenu} aria-label="Open account menu"
               className="flex items-center gap-2 pl-1 pr-2 py-1 bg-white/5 border border-white/10 rounded-full hover:bg-white/10">
