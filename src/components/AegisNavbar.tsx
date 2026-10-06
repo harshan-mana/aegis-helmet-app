@@ -524,11 +524,11 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
               className="p-2.5 bg-cyber-blue rounded-2xl shadow-[0_0_20px_#FF6B35] hover:scale-105 transition-transform flex items-center justify-center">
               <Shield className="w-5 h-5 text-black" />
             </button>
-            <div>
-              <span className="text-xl font-display font-black tracking-[0.28em] text-white drop-shadow">AEGIS AI</span>
-              <div className="flex items-center gap-1.5 mt-0.5">
+            <div className="flex flex-col justify-center">
+              <span className="text-2xl sm:text-3xl font-display font-black tracking-[0.3em] text-white drop-shadow leading-none">AEGIS AI</span>
+              <div className="flex items-center gap-1.5 mt-1">
                 <div className="w-1.5 h-1.5 rounded-full bg-cyber-green animate-pulse" />
-                <span className="text-[9px] font-mono text-cyber-blue/80 uppercase tracking-widest">v2.5</span>
+                <span className="text-[10px] font-mono text-cyber-blue/80 uppercase tracking-widest">v2.5</span>
               </div>
             </div>
           </div>
