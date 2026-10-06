@@ -523,7 +523,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
           </div>
 
           {/* Right-side controls: Shield (launcher) + Settings + H account */}
-          <div className="flex items-center justify-end gap-3 relative z-10 mt-5 -mr-2 sm:mt-6">
+          <div className="flex items-center justify-end gap-3 relative z-10 self-end -mr-2 sm:-mr-3">
             <button ref={gridRef} onClick={toggleLauncher} aria-label="Open feature launcher"
               className="w-10 h-10 bg-cyber-blue rounded-2xl shadow-[0_0_20px_#FF6B35] hover:scale-105 transition-transform flex items-center justify-center">
               <Shield className="w-5 h-5 text-black" />
