@@ -512,32 +512,22 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
   return (
     <>
       <nav className="relative z-[80] w-full max-w-5xl mx-auto px-4 sm:px-8 pt-6">
-        <div className="glass-panel px-6 py-3.5 border-white/10 grid grid-cols-[1fr_auto_1fr] items-center relative overflow-hidden group shadow-[0_0_40px_rgba(0,0,0,0.8)]">
-          <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-20">
-            <motion.div animate={{ x: ['-100%', '200%'] }} transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
-              className="w-24 h-full bg-gradient-to-r from-transparent via-cyber-blue to-transparent skew-x-12" />
-          </div>
-
-          {/* Left spacer — no branding on the left */}
+        <div className="px-6 py-3.5 grid grid-cols-[1fr_auto_1fr] items-center relative">
+          {/* Left spacer */}
           <div />
 
-          {/* Centered AEGIS branding */}
-          <div className="flex items-center gap-3.5 relative z-10">
+          {/* Centered title */}
+          <div className="flex items-center gap-2 relative z-10">
+            <span className="text-[20px] font-display font-black tracking-[0.2em] text-white leading-none">AEGIS AI</span>
+            <span className="text-[20px] font-display font-black tracking-[0.2em] text-cyber-blue/80 uppercase leading-none">V2.5</span>
+          </div>
+
+          {/* Right-side controls: Shield (launcher) + Settings + H account */}
+          <div className="flex items-center justify-end gap-3 relative z-10">
             <button ref={gridRef} onClick={toggleLauncher} aria-label="Open feature launcher"
               className="p-2.5 bg-cyber-blue rounded-2xl shadow-[0_0_20px_#FF6B35] hover:scale-105 transition-transform flex items-center justify-center">
               <Shield className="w-5 h-5 text-black" />
             </button>
-            <div className="flex flex-col justify-center">
-              <span className="text-2xl sm:text-3xl font-display font-black tracking-[0.3em] text-white drop-shadow leading-none">AEGIS AI</span>
-              <div className="flex items-center gap-1.5 mt-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-cyber-green animate-pulse" />
-                <span className="text-[10px] font-mono text-cyber-blue/80 uppercase tracking-widest">v2.5</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Right-side controls: Settings gear + H account */}
-          <div className="flex items-center justify-end gap-3 relative z-10">
             <button onClick={() => onViewChange('settings')} aria-label="Open settings"
               className="p-2.5 bg-white/5 rounded-xl border border-white/10 text-white/50 hover:text-white transition-all">
               <Settings className="w-5 h-5" />
