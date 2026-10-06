@@ -117,6 +117,12 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [satellites, setSatellites] = useState(0);
   const [gpsAccuracy, setGpsAccuracy] = useState(0);
+  const [gpsAltitude, setGpsAltitude] = useState<number | null>(null);
+  const [gpsHeading, setGpsHeading] = useState<number | null>(null);
+  const [gpsSpeed, setGpsSpeed] = useState(0);
+  const [gpsSignalWeak, setGpsSignalWeak] = useState(false);
+  const lastGpsFixAtRef = useRef(0);
+  const lastPosRef = useRef<{ lat: number; lng: number; t: number } | null>(null);
 
   // Webcam state
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -151,9 +157,10 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   const [newContactName, setNewContactName] = useState('');
   const [newContactPhone, setNewContactPhone] = useState('');
 
-  // Speed simulator
+  // Speed simulator (fallback only when no recent GPS fix)
   useEffect(() => {
     const interval = setInterval(() => {
+      if (Date.now() - lastGpsFixAtRef.current < 3000) return; // GPS is powering the speedometer
       setSpeedKmh((prev) => {
         const delta = (Math.random() - 0.48) * 4;
         const next = Math.max(0, Math.min(120, prev + delta));
@@ -165,7 +172,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     return () => clearInterval(interval);
   }, []);
 
-  // GPS tracker
+  // GPS tracker — high-accuracy, rapid updates
   useEffect(() => {
     if (!navigator.geolocation) {
       setGpsStatus('unavailable');
@@ -174,23 +181,62 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
 
     let watchId: number;
 
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
+      const R = 6371000;
+      const dLat = toRad(b.lat - a.lat);
+      const dLng = toRad(b.lng - a.lng);
+      const lat1 = toRad(a.lat);
+      const lat2 = toRad(b.lat);
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(h));
+    };
+
     const startGPS = () => {
       setGpsStatus('searching');
       watchId = navigator.geolocation.watchPosition(
         (pos) => {
-          setGpsCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-          setGpsAccuracy(parseFloat(pos.coords.accuracy.toFixed(1)));
+          const coords: any = pos.coords;
+          const lat = coords.latitude;
+          const lng = coords.longitude;
+          const acc = typeof coords.accuracy === 'number' ? parseFloat(coords.accuracy.toFixed(1)) : 0;
+          const alt = typeof coords.altitude === 'number' && !isNaN(coords.altitude) ? parseFloat(coords.altitude.toFixed(1)) : null;
+          const heading = typeof coords.heading === 'number' && !isNaN(coords.heading) ? Math.round(coords.heading) : null;
+
+          lastGpsFixAtRef.current = Date.now();
+          setGpsCoords({ lat, lng });
+          setGpsAccuracy(acc);
+          setGpsAltitude(alt);
+          setGpsHeading(heading);
+          setGpsSignalWeak(acc > 30 || (typeof pos.coords.accuracy !== 'number' && acc === 0));
+
+          // Native speed in m/s, with a distance/time fallback when the device doesn't supply it
+          let speedMps = typeof coords.speed === 'number' && !isNaN(coords.speed) && coords.speed >= 0 ? coords.speed : null;
+          if (speedMps === null && lastPosRef.current) {
+            const dt = Math.max(0.001, (pos.timestamp - lastPosRef.current.t) / 1000);
+            speedMps = haversine(lastPosRef.current, { lat, lng }) / dt;
+          }
+          const speedKmhVal = speedMps !== null ? Math.max(0, parseFloat((speedMps * 3.6).toFixed(1))) : 0;
+          setGpsSpeed(speedKmhVal);
+          setSpeedKmh(speedKmhVal);
+          setSpeedHistory((h) => [...h.slice(-29), speedKmhVal]);
+
+          lastPosRef.current = { lat, lng, t: pos.timestamp };
           setSatellites(Math.floor(Math.random() * 4) + 8);
           setGpsStatus('locked');
         },
         (err) => {
           if (err.code === err.PERMISSION_DENIED) {
             setGpsStatus('denied');
+          } else if (err.code === err.TIMEOUT) {
+            setGpsSignalWeak(true);
+            setGpsStatus('searching');
           } else {
+            setGpsSignalWeak(true);
             setGpsStatus('unavailable');
           }
         },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
       );
     };
 
@@ -533,7 +579,13 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
               <p className="text-[10px] font-mono text-white/50">
                 ACC: <span className="text-cyber-green">±{gpsAccuracy}m</span> | SAT: <span className="text-cyber-purple">{satellites}</span>
               </p>
+              <p className="text-[10px] font-mono text-white/50">
+                ALT: <span className="text-white">{gpsAltitude !== null ? `${gpsAltitude}m` : '—'}</span> | HDG: <span className="text-white">{gpsHeading !== null ? `${gpsHeading}°` : '—'}</span> | SPD: <span className="text-cyber-green">{gpsSpeed.toFixed(1)} km/h</span>
+              </p>
             </div>
+          )}
+          {gpsSignalWeak && gpsStatus !== 'denied' && (
+            <p className="text-[9px] text-cyber-orange mt-2">GPS signal is weak — move to open sky for better accuracy.</p>
           )}
           {gpsStatus === 'denied' && (
             <p className="text-[9px] text-cyber-red/70 mt-2">Enable location permissions in browser settings</p>
