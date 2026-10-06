@@ -512,13 +512,16 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
   return (
     <>
       <nav className="relative z-[80] w-full max-w-5xl mx-auto px-4 sm:px-8 pt-6">
-        <div className="glass-panel px-6 py-3.5 border-white/10 flex items-center justify-between relative overflow-hidden group shadow-[0_0_40px_rgba(0,0,0,0.8)]">
+        <div className="glass-panel px-6 py-3.5 border-white/10 grid grid-cols-[1fr_auto_1fr] items-center relative overflow-hidden group shadow-[0_0_40px_rgba(0,0,0,0.8)]">
           <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-20">
             <motion.div animate={{ x: ['-100%', '200%'] }} transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
               className="w-24 h-full bg-gradient-to-r from-transparent via-cyber-blue to-transparent skew-x-12" />
           </div>
 
-          {/* Logo + Launcher trigger */}
+          {/* Left spacer — no branding on the left */}
+          <div />
+
+          {/* Centered AEGIS branding */}
           <div className="flex items-center gap-3.5 relative z-10">
             <button ref={gridRef} onClick={toggleLauncher} aria-label="Open feature launcher"
               className="p-2.5 bg-cyber-blue rounded-2xl shadow-[0_0_20px_#FF6B35] hover:scale-105 transition-transform flex items-center justify-center">
@@ -533,20 +536,15 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
             </div>
           </div>
 
-          {/* Nav Items */}
-          <div className="hidden md:flex items-center gap-1.5 bg-white/5 p-1 rounded-2xl border border-white/5 relative z-10">
-            {navItems.map((item) => (
-              <button key={item.id} onClick={() => onViewChange(item.id as any)}
-                className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all ${
-                  currentView === item.id ? 'text-black bg-cyber-blue shadow-[0_0_20px_#FF6B35]' : 'text-white/50 hover:text-white hover:bg-white/5'
-                }`}>
-                <item.icon className="w-4 h-4" />{item.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Utility Controls */}
-          <div className="flex items-center gap-3 relative z-10">
+          {/* Right-side controls: Settings gear + H account */}
+          <div className="flex items-center justify-end gap-3 relative z-10">
+            <button onClick={() => onViewChange('settings')} aria-label="Open settings"
+              className="p-2.5 bg-white/5 rounded-xl border border-white/10 text-white/50 hover:text-white transition-all">
+              <Settings className="w-5 h-5" />
+            </button>
+            <button className="md:hidden p-2 text-white/50 hover:text-white" onClick={() => setIsMenuOpen(!isMenuOpen)}>
+              {isMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
             <button ref={avatarRef} onClick={toggleAccountMenu} aria-label="Open account menu"
               className="flex items-center gap-2 pl-1 pr-2 py-1 bg-white/5 border border-white/10 rounded-full hover:bg-white/10">
               {userPhoto ? <img src={userPhoto} alt={userName || 'User'} className="w-7 h-7 rounded-full object-cover" /> :
@@ -558,11 +556,6 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
           </div>
 
           {/* Mobile Menu */}
-          <div className="flex items-center gap-3 relative z-10">
-            <button className="md:hidden p-2 text-white/50 hover:text-white" onClick={() => setIsMenuOpen(!isMenuOpen)}>
-              {isMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-            </button>
-          </div>
         </div>
 
         {/* Mobile Menu */}
