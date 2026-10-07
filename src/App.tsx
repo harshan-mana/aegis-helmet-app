@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { SESSION_MAX_AGE_MS } from './lib/firebase';
 import { doc, getDoc, setDoc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { Shield, ShieldAlert, User, Phone, Save, X, Zap, Settings, LogOut, ChevronDown, Palette, Moon, Sun, Sparkles } from 'lucide-react';
@@ -87,6 +88,21 @@ export default function App() {
     let unsubscribeProfile: (() => void) | null = null;
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (u) => {
+      // Expiration check: sign out if the session is older than SESSION_MAX_AGE_MS
+      const savedAt = Number(localStorage.getItem('aegis_auth_time') || '0');
+      if (u && savedAt && Date.now() - savedAt > SESSION_MAX_AGE_MS) {
+        try { localStorage.removeItem('aegis_auth_time'); } catch {}
+        setLocalUser(null);
+        setUserRole(null);
+        setShowProfilePrompt(false);
+        try { await signOut(auth); } catch {}
+        setLoading(false);
+        return;
+      }
+      // Persist session persistence anchor (do not reset on every reload)
+      if (u && !localStorage.getItem('aegis_auth_time')) {
+        try { localStorage.setItem('aegis_auth_time', String(Date.now())); } catch {}
+      }
       setUser(u);
       if (unsubscribeProfile) unsubscribeProfile();
 
@@ -159,6 +175,7 @@ export default function App() {
       localStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
       localStorage.removeItem('aegis_guest_active');
       localStorage.removeItem('aegis_guest_role');
+      localStorage.removeItem('aegis_auth_time');
     } catch (e) {
       console.warn('LocalStorage error:', e);
     }
