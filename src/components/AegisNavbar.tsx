@@ -334,6 +334,8 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
     return createPortal(
       <motion.div
         data-account-menu
+        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -8 }}

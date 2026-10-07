@@ -45,8 +45,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as Dialog from '@radix-ui/react-dialog';
-import * as tf from '@tensorflow/tfjs';
-import * as cocoSsd from '@tensorflow-models/coco-ssd';
+import type * as cocoSsd from '@tensorflow-models/coco-ssd';
 
 interface EmergencyContact {
   id: string;
@@ -365,7 +364,9 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     let cancelled = false;
     (async () => {
       try {
+        const tf = await import('@tensorflow/tfjs');
         await tf.ready();
+        const cocoSsd = await import('@tensorflow-models/coco-ssd');
         const m = await cocoSsd.load();
         if (!cancelled) {
           modelRef.current = m;
@@ -570,7 +571,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                   : 'bg-white/5 text-white/50 border border-white/10 hover:bg-white/10'
               }`}
             >
-              {esp32Connected ? 'Connected' : 'Connect'}
+              {esp32Connected ? 'Disconnect' : 'Connect'}
             </button>
           </div>
           {esp32Connected ? (
