@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup, onAuthStateChanged, User } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup, onAuthStateChanged, User, browserLocalPersistence, setPersistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -13,9 +13,14 @@ export const appleProvider = new OAuthProvider('apple.com');
 // Enable Firebase Auth
 try {
   auth.useDeviceLanguage();
+  // Keep the user logged in across reloads / browser restarts
+  setPersistence(auth, browserLocalPersistence).catch((e) => console.warn('Persistence warning:', e));
 } catch (e) {
   console.warn('Firebase auth init warning:', e);
 }
+
+// Session is considered expired after 7 days of inactivity
+export const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export enum OperationType {
   CREATE = 'create',
