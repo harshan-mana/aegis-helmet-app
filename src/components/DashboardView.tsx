@@ -167,22 +167,6 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   const [newContactName, setNewContactName] = useState('');
   const [newContactPhone, setNewContactPhone] = useState('');
 
-  // Speed simulator (fallback only when no recent GPS fix)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (lastGpsFixAtRef.current !== 0) return; // a real GPS fix has occurred — never fall back to ghost speeds
-      if (Date.now() - lastGpsFixAtRef.current < 3000) return;
-      setSpeedKmh((prev) => {
-        const delta = (Math.random() - 0.48) * 4;
-        const next = Math.max(0, Math.min(120, prev + delta));
-        const rounded = parseFloat(next.toFixed(1));
-        setSpeedHistory((h) => [...h.slice(-29), rounded]);
-        return rounded;
-      });
-    }, 1200);
-    return () => clearInterval(interval);
-  }, []);
-
   // GPS tracker — high-accuracy, rapid updates
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -247,12 +231,15 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
         (err) => {
           if (err.code === err.PERMISSION_DENIED) {
             setGpsStatus('denied');
+            setGpsSpeed(0); setSpeedKmh(0);
           } else if (err.code === err.TIMEOUT) {
             setGpsSignalWeak(true);
             setGpsStatus('searching');
+            setGpsSpeed(0); setSpeedKmh(0);
           } else {
             setGpsSignalWeak(true);
             setGpsStatus('unavailable');
+            setGpsSpeed(0); setSpeedKmh(0);
           }
         },
         { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
@@ -506,7 +493,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     <div className="pt-24 pb-16 px-4 sm:px-8 max-w-[1700px] mx-auto space-y-6">
 
       {/* TOP HUD - 2 METRICS - Scrolls naturally with page */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {/* 1. Digital Speedometer with Detected Vehicles */}
         <div className="glass-panel p-5 border-cyber-blue/20 relative overflow-hidden">
           <div className="flex items-center gap-2 mb-3">
