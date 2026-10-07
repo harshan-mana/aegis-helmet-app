@@ -570,9 +570,9 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
       {/* Portal-based dropdowns - rendered to document.body to escape all clipping contexts */}
       {renderLauncher()}
       {renderAccountMenu()}
-      <AnimatePresence>{renderAddFeatureModal()}</AnimatePresence>
-      <AnimatePresence>{renderLogoutConfirm()}</AnimatePresence>
-      <AnimatePresence>{renderSwitchAccount()}</AnimatePresence>
+      {renderAddFeatureModal()}
+      {renderLogoutConfirm()}
+      {renderSwitchAccount()}
     </>
   );
 }
