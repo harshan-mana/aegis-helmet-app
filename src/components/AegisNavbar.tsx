@@ -61,10 +61,14 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
 };
 
 const THEMES = [
-  { id: 'cyber', name: 'AEGIS Dark', icon: Moon, color: 'text-cyber-blue' },
-  { id: 'sunset', name: 'Orange Glow', icon: Sun, color: 'text-cyber-orange' },
-  { id: 'aurora', name: 'Midnight', icon: Sparkles, color: 'text-cyber-purple' },
-  { id: 'ocean', name: 'High Contrast', icon: Palette, color: 'text-cyber-green' },
+  { id: 'cyber', name: 'Cyber Night', icon: Moon, color: 'text-cyber-blue' },
+  { id: 'sunset', name: 'Sunset Ember', icon: Sun, color: 'text-cyber-orange' },
+  { id: 'aurora', name: 'Aurora Violet', icon: Sparkles, color: 'text-cyber-purple' },
+  { id: 'ocean', name: 'Ocean Deep', icon: Palette, color: 'text-cyber-green' },
+  { id: 'midnight', name: 'Midnight Blue', icon: Moon, color: 'text-blue-400' },
+  { id: 'magma', name: 'Magma Red', icon: Sun, color: 'text-red-400' },
+  { id: 'forest', name: 'Forest Moss', icon: Sparkles, color: 'text-emerald-400' },
+  { id: 'graphite', name: 'Titanium Graphite', icon: Palette, color: 'text-stone-300' },
 ];
 
 const AVATAR_COLORS = ['bg-pink-500', 'bg-purple-500', 'bg-blue-500', 'bg-green-500', 'bg-orange-500', 'bg-red-500', 'bg-teal-500', 'bg-indigo-500'];
@@ -302,8 +306,8 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
             <div className="grid grid-cols-2 gap-2">
               {THEMES.map((t) => (
                 <button key={t.id} onClick={() => setCurrentTheme?.(t.id)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all ${
-                    currentTheme === t.id ? 'bg-white/10 text-white' : 'text-white/50 hover:bg-white/5 hover:text-white'
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all border ${
+                    currentTheme === t.id ? 'bg-white/10 text-white border-white/20' : 'text-white/50 hover:bg-white/5 hover:text-white border-transparent'
                   }`}>
                   <t.icon className={`w-4 h-4 ${t.color}`} />{t.name}
                 </button>
