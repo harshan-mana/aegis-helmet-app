@@ -16,9 +16,13 @@ import { AegisAuthUser, LOCAL_AUTH_STORAGE_KEY } from './types/auth';
 
 const THEMES = [
   { id: 'cyber', name: 'Cyber Night', icon: Moon, bg: 'bg-[#14100D]', accent: 'cyber-blue' },
-  { id: 'sunset', name: 'Sunset Glow', icon: Sun, bg: 'bg-[#1a0a0a]', accent: 'cyber-orange' },
-  { id: 'aurora', name: 'Aurora', icon: Sparkles, bg: 'bg-[#0a0a1a]', accent: 'cyber-purple' },
-  { id: 'ocean', name: 'Ocean', icon: Palette, bg: 'bg-[#0a1a1a]', accent: 'cyber-green' },
+  { id: 'sunset', name: 'Sunset Ember', icon: Sun, bg: 'bg-[#1a0a0a]', accent: 'cyber-orange' },
+  { id: 'aurora', name: 'Aurora Violet', icon: Sparkles, bg: 'bg-[#0a0a1a]', accent: 'cyber-purple' },
+  { id: 'ocean', name: 'Ocean Deep', icon: Palette, bg: 'bg-[#0a1a1a]', accent: 'cyber-green' },
+  { id: 'midnight', name: 'Midnight Blue', icon: Moon, bg: 'bg-[#000d1f]', accent: 'cyber-blue' },
+  { id: 'magma', name: 'Magma Red', icon: Sun, bg: 'bg-[#1c0505]', accent: 'cyber-red' },
+  { id: 'forest', name: 'Forest Moss', icon: Sparkles, bg: 'bg-[#04150f]', accent: 'emerald-400' },
+  { id: 'graphite', name: 'Titanium Graphite', icon: Palette, bg: 'bg-[#0d0d10]', accent: 'stone-300' },
 ];
 
 export default function App() {
@@ -61,7 +65,7 @@ export default function App() {
 
   // Splash screen timer
   useEffect(() => {
-    const timer = setTimeout(() => setShowSplash(false), 2500);
+    const timer = setTimeout(() => setShowSplash(false), 600);
     return () => clearTimeout(timer);
   }, []);
 
