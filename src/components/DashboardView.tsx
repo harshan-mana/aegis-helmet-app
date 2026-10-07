@@ -46,6 +46,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import * as Dialog from '@radix-ui/react-dialog';
 import type * as cocoSsd from '@tensorflow-models/coco-ssd';
+import { saveViolation, getAllViolations, deleteViolation, ViolationRecord } from '../utils/violationStorage';
 
 interface EmergencyContact {
   id: string;
@@ -112,6 +113,20 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   // Person detection state
   const [detectedPersons, setDetectedPersons] = useState<string[]>([]);
   const [capturedImages, setCapturedImages] = useState<string[]>([]);
+  const [evidenceViolations, setEvidenceViolations] = useState<{ id: string; url: string; label: string; record: ViolationRecord }[]>([]);
+  const [storageError, setStorageError] = useState<string | null>(null);
+
+  // Load existing evidence from IndexedDB on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const records = await getAllViolations();
+      if (cancelled) return;
+      const items = records.map((r) => ({ id: r.id, url: URL.createObjectURL(r.blob), label: r.type, record: r }));
+      setEvidenceViolations(items);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // GPS state
   const [gpsStatus, setGpsStatus] = useState<'searching' | 'locked' | 'denied' | 'unavailable'>('searching');
@@ -732,7 +747,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                     {detectionActive ? 'Stop Detection' : 'YOLOv8 Detect'}
                   </button>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       if (videoRef.current && canvasRef.current) {
                         const canvas = canvasRef.current;
                         const ctx = canvas.getContext('2d');
@@ -742,6 +757,29 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                           ctx.drawImage(videoRef.current, 0, 0);
                           const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
                           setCapturedImages(prev => [...prev, dataUrl]);
+                          // Persist evidence image locally
+                          try {
+                            const resp = await fetch(dataUrl);
+                            const blob = await resp.blob();
+                            const id = `${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+                            const record: ViolationRecord = {
+                              id,
+                              type: detectedObjects[0] || 'capture',
+                              createdAt: Date.now(),
+                              speed: speedKmh,
+                              objects: detectedObjects.join(', '),
+                              confidence: detectionConfidence,
+                              lat: gpsCoords?.lat ?? null,
+                              lng: gpsCoords?.lng ?? null,
+                              blob,
+                            };
+                            const ok = await saveViolation(record);
+                            if (!ok) setStorageError('Evidence could not be saved locally.');
+                            else setEvidenceViolations(prev => [{ id, url: URL.createObjectURL(blob), label: record.type, record }, ...prev]);
+                          } catch (e) {
+                            console.error('Violation save failed:', e);
+                            setStorageError('Evidence could not be saved locally.');
+                          }
                         }
                       }
                     }}
@@ -873,18 +911,23 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
             </div>
           )}
 
-          {/* Captured Images Gallery */}
-          {capturedImages.length > 0 && (
+          {/* Captured / Violation Evidence Gallery */}
+          {evidenceViolations.length > 0 && (
             <div className="glass-panel p-5 border-white/10">
               <h3 className="text-xs font-black uppercase tracking-widest text-white mb-4 flex items-center gap-2">
-                <Camera className="w-4 h-4 text-cyber-green" /> Captured Images ({capturedImages.length})
+                <Camera className="w-4 h-4 text-cyber-green" /> Evidence ({evidenceViolations.length})
               </h3>
+              {storageError && <p className="text-[9px] text-cyber-red mb-2">{storageError}</p>}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {capturedImages.map((img, idx) => (
-                  <div key={idx} className="relative group">
-                    <img src={img} alt={`Captured ${idx + 1}`} className="w-full h-24 object-cover rounded-xl border border-white/10" />
+                {evidenceViolations.map((v) => (
+                  <div key={v.id} className="relative group">
+                    <img src={v.url} alt={`Evidence ${v.label}`} className="w-full h-24 object-cover rounded-xl border border-white/10" />
                     <button
-                      onClick={() => setCapturedImages(prev => prev.filter((_, i) => i !== idx))}
+                      onClick={() => {
+                        deleteViolation(v.id);
+                        URL.revokeObjectURL(v.url);
+                        setEvidenceViolations(prev => prev.filter(x => x.id !== v.id));
+                      }}
                       className="absolute top-1 right-1 p-1 bg-cyber-red/80 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <Trash2 className="w-3 h-3" />
