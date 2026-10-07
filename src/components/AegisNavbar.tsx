@@ -516,18 +516,18 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
   return (
     <>
       <nav className="relative z-[80] w-full max-w-5xl mx-auto px-4 sm:px-8 pt-6">
-        <div className="px-6 py-3.5 grid grid-cols-[1fr_auto_1fr] items-center relative">
-          {/* Left spacer */}
-          <div />
+        <div className="px-4 sm:px-6 py-3.5 flex flex-col items-center gap-2 sm:grid sm:grid-cols-[1fr_auto_1fr] sm:items-center relative">
+          {/* Left spacer (centers branding on desktop) */}
+          <div className="hidden sm:block" />
 
-          {/* Centered title */}
+          {/* Centered AEGIS branding */}
           <div className="flex items-center gap-2 relative z-10">
-            <span className="text-[60px] font-display font-black tracking-[0.2em] text-white leading-none">AEGIS AI</span>
-            <span className="text-[60px] font-display font-black tracking-[0.2em] text-cyber-blue/80 uppercase leading-none">V2.5</span>
+            <span className="text-[28px] sm:text-[40px] lg:text-[60px] font-display font-black tracking-[0.2em] text-white leading-none">AEGIS AI</span>
+            <span className="text-[28px] sm:text-[40px] lg:text-[60px] font-display font-black tracking-[0.2em] text-cyber-blue/80 uppercase leading-none">V2.5</span>
           </div>
 
           {/* Right-side controls: Shield (launcher) + Settings + H account */}
-          <div className="flex items-center justify-end gap-3 relative z-10 self-end -mr-2 sm:-mr-3">
+          <div className="flex items-center justify-center sm:justify-end gap-3 relative z-10 self-center sm:self-end sm:-mr-2">
             <button ref={gridRef} onClick={toggleLauncher} aria-label="Open feature launcher"
               className="w-10 h-10 bg-cyber-blue rounded-2xl shadow-[0_0_20px_#FF6B35] hover:scale-105 transition-transform flex items-center justify-center">
               <Shield className="w-5 h-5 text-black" />
