@@ -170,7 +170,8 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   // Speed simulator (fallback only when no recent GPS fix)
   useEffect(() => {
     const interval = setInterval(() => {
-      if (Date.now() - lastGpsFixAtRef.current < 3000) return; // GPS is powering the speedometer
+      if (lastGpsFixAtRef.current !== 0) return; // a real GPS fix has occurred — never fall back to ghost speeds
+      if (Date.now() - lastGpsFixAtRef.current < 3000) return;
       setSpeedKmh((prev) => {
         const delta = (Math.random() - 0.48) * 4;
         const next = Math.max(0, Math.min(120, prev + delta));
@@ -226,7 +227,15 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
             const dt = Math.max(0.001, (pos.timestamp - lastPosRef.current.t) / 1000);
             speedMps = haversine(lastPosRef.current, { lat, lng }) / dt;
           }
-          const speedKmhVal = speedMps !== null ? Math.max(0, parseFloat((speedMps * 3.6).toFixed(1))) : 0;
+          let speedKmhVal = speedMps !== null ? Math.max(0, parseFloat((speedMps * 3.6).toFixed(1))) : 0;
+          // Stationary filter: sub-jitter speeds (e.g. GPS drift while parked) become zero
+          if (speedKmhVal < 1.5) speedKmhVal = 0;
+          // Reject physically small position jumps that can't be real movement
+          if (speedMps !== null && speedKmhVal === 0 && lastPosRef.current) {
+            const dt = Math.max(0.001, (pos.timestamp - lastPosRef.current.t) / 1000);
+            const jumpM = haversine(lastPosRef.current, { lat, lng });
+            if (jumpM / dt * 3.6 < 1.5) speedKmhVal = 0;
+          }
           setGpsSpeed(speedKmhVal);
           setSpeedKmh(speedKmhVal);
           setSpeedHistory((h) => [...h.slice(-29), speedKmhVal]);
