@@ -352,23 +352,25 @@ export default function App() {
 
   return (
     <div className={`min-h-screen ${theme.bg} transition-colors duration-500`}>
-      <AegisNavbar
-        userRole={userRole}
-        onViewChange={setCurrentView}
-        currentView={currentView}
-        onSignOut={handleSignOut}
-        onLogin={() => setIsAuthModalOpen(true)}
-        onServiceProviderLogin={() => setIsServiceProviderOpen(true)}
-        userName={effectiveUser?.displayName || undefined}
-        userPhoto={effectiveUser?.photoURL || undefined}
-        showUserMenu={showUserMenu}
-        setShowUserMenu={setShowUserMenu}
-        showThemeMenu={showThemeMenu}
-        setShowThemeMenu={setShowThemeMenu}
-        currentTheme={currentTheme}
-        setCurrentTheme={setCurrentTheme}
-        onSwitchAccount={() => { handleSignOut(); setIsAuthModalOpen(true); }}
-      />
+      {effectiveUser && (
+        <AegisNavbar
+          userRole={userRole}
+          onViewChange={setCurrentView}
+          currentView={currentView}
+          onSignOut={handleSignOut}
+          onLogin={() => setIsAuthModalOpen(true)}
+          onServiceProviderLogin={() => setIsServiceProviderOpen(true)}
+          userName={effectiveUser?.displayName || undefined}
+          userPhoto={effectiveUser?.photoURL || undefined}
+          showUserMenu={showUserMenu}
+          setShowUserMenu={setShowUserMenu}
+          showThemeMenu={showThemeMenu}
+          setShowThemeMenu={setShowThemeMenu}
+          currentTheme={currentTheme}
+          setCurrentTheme={setCurrentTheme}
+          onSwitchAccount={() => { handleSignOut(); setIsAuthModalOpen(true); }}
+        />
+      )}
 
       <main>
         {!effectiveUser ? (

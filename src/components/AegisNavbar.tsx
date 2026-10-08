@@ -260,7 +260,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
         </div>
 
         {/* Content */}
-        <div className="p-5 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+        <div className="p-5 overflow-y-auto overscroll-contain touch-pan-y" style={{ maxHeight: 'calc(100vh - 220px)' }}>
           {customizeMode ? (
             <div className="space-y-2">
               {features.map((f, i) => {
