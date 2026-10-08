@@ -325,18 +325,6 @@ export default function App() {
     );
   }
 
-  if (loading) {
-    return (
-      <div className="h-screen w-screen flex items-center justify-center bg-[#0a0a0f]">
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-          className="w-8 h-8 border-2 border-cyber-blue border-t-transparent rounded-full"
-        />
-      </div>
-    );
-  }
-
   // Show Landing Page first
   if (showLanding) {
     return <LandingPage onLogin={(user) => {

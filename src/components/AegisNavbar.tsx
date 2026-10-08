@@ -94,6 +94,9 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
   const userMenuRef = useRef<HTMLDivElement>(null);
   const avatarRef = useRef<HTMLButtonElement>(null);
   const gridRef = useRef<HTMLButtonElement>(null);
+  // Tap-guard: timestamp of the last shield pointerup, used to ignore the
+  // synthetic click that follows a real tap (prevents one tap firing twice).
+  const lastShieldPointerUpAt = useRef(0);
 
   // Save features to localStorage
   useEffect(() => { localStorage.setItem('aegis_features', JSON.stringify(features)); }, [features]);
@@ -134,13 +137,29 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
     }
   }, []);
 
-  // Toggle launcher
+  // Toggle launcher — the single toggle path for shield/launcher state.
   const toggleLauncher = useCallback(() => {
     if (!launcherOpen) updateLauncherPosition();
     setLauncherOpen(!launcherOpen);
     setShowUserMenu?.(false);
     setCustomizeMode(false);
   }, [launcherOpen, setShowUserMenu, updateLauncherPosition]);
+
+  // Shield activation via Pointer Events with a tap-guard.
+  // A physical tap fires pointerup then click. We activate on pointerup and
+  // stamp the time so the immediately-following click is ignored — one tap
+  // toggles exactly once. Keyboard / assistive activation (no pointerup) still
+  // works through onClick. Works identically on touch, mouse, and pen.
+  const onShieldPointerUp = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    lastShieldPointerUpAt.current = Date.now();
+    toggleLauncher();
+  }, [toggleLauncher]);
+
+  const onShieldClick = useCallback(() => {
+    if (Date.now() - lastShieldPointerUpAt.current < 500) return;
+    toggleLauncher();
+  }, [toggleLauncher]);
 
   // Toggle account menu
   const toggleAccountMenu = useCallback(() => {
@@ -150,9 +169,10 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
     setCustomizeMode(false);
   }, [showUserMenu, setShowUserMenu, updateAccountPosition]);
 
-  // Close menus when clicking outside
+  // Close menus when tapping/clicking outside (pointerdown works
+  // consistently on touch, mouse, and pen; mousedown is emulated on mobile).
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
+    const handleClick = (e: PointerEvent) => {
       const target = e.target as HTMLElement;
       const insideAccount = target.closest('[data-account-menu]') !== null || (avatarRef.current !== null && avatarRef.current.contains(target));
       if (!insideAccount) setShowUserMenu?.(false);
@@ -160,8 +180,8 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
       const isInsideGridButton = gridRef.current !== null && gridRef.current.contains(target);
       if (!isInsideLauncher && !isInsideGridButton) { setLauncherOpen(false); setCustomizeMode(false); }
     };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener('pointerdown', handleClick);
+    return () => document.removeEventListener('pointerdown', handleClick);
   }, [setShowUserMenu]);
 
   // Close on Escape
@@ -534,8 +554,15 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
 
           {/* Right-side controls: Shield (launcher) + Settings + H account */}
           <div className="flex items-center justify-center sm:justify-end gap-3 relative z-10 self-center sm:self-end sm:-mr-2">
-            <button ref={gridRef} onClick={toggleLauncher} aria-label="Open feature launcher"
-              className="w-10 h-10 bg-cyber-blue rounded-2xl shadow-[0_0_20px_#FF6B35] hover:scale-105 transition-transform flex items-center justify-center">
+            <button
+              ref={gridRef}
+              type="button"
+              onPointerUp={onShieldPointerUp}
+              onClick={onShieldClick}
+              aria-label="Open feature launcher"
+              className="w-11 h-11 bg-cyber-blue rounded-2xl shadow-[0_0_20px_#FF6B35] hover:scale-105 transition-transform flex items-center justify-center select-none"
+              style={{ touchAction: 'manipulation' }}
+            >
               <Shield className="w-5 h-5 text-black" />
             </button>
             <button onClick={() => onViewChange('settings')} aria-label="Open settings"
