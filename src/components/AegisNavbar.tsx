@@ -109,12 +109,13 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
   const updateLauncherPosition = useCallback(() => {
     if (gridRef.current) {
       const rect = gridRef.current.getBoundingClientRect();
-      const launcherWidth = 480;
+      const launcherWidth = Math.min(480, window.innerWidth - 16);
       let left = rect.right - launcherWidth;
       if (left < 8) left = 8;
       if (left + launcherWidth > window.innerWidth - 8) {
         left = window.innerWidth - launcherWidth - 8;
       }
+      left = Math.max(8, Math.min(left, Math.max(8, window.innerWidth - launcherWidth - 8)));
       setLauncherPos({ top: rect.bottom + 10, left });
     }
   }, []);
