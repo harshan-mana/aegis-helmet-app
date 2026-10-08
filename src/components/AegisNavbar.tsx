@@ -182,6 +182,9 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
   }, [updateLauncherPosition]);
 
   const navItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: Gauge, color: 'text-blue-500' },
+    { id: 'violations', label: 'Violations', icon: AlertTriangle, color: 'text-red-500' },
+    { id: 'authority', label: 'RTO Command', icon: LayoutDashboard, color: 'text-green-500' },
     { id: 'settings', label: 'Settings', icon: Settings, color: 'text-gray-500' },
   ];
 
