@@ -55,6 +55,16 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isServiceProviderOpen, setIsServiceProviderOpen] = useState(false);
   const [showProfilePrompt, setShowProfilePrompt] = useState(false);
+  const [greeting, setGreeting] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  useEffect(() => {
+    const on = () => setIsOnline(true);
+    const off = () => setIsOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
   const [profileData, setProfileData] = useState({ name: '', phone: '', guardianName: '', guardianPhone: '' });
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showThemeMenu, setShowThemeMenu] = useState(false);
@@ -74,6 +84,24 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('aegis_theme', currentTheme);
   }, [currentTheme]);
+
+  // Greeting (first-time vs returning user), persisted per account
+  useEffect(() => {
+    if (!effectiveUser) return;
+    try {
+      const saved = localStorage.getItem('aegis_user_profile');
+      if (!saved) return;
+      const profile = JSON.parse(saved);
+      if (!profile.name || !profile.phone) return;
+      const uid = effectiveUser.uid || effectiveUser.email || 'anon';
+      const flagKey = 'aegis_seen_welcome_' + uid;
+      const already = localStorage.getItem(flagKey);
+      setGreeting(already ? `Welcome back, ${profile.name}.` : `Hello, ${profile.name}. Welcome to AEGIS.`);
+      if (!already) localStorage.setItem(flagKey, '1');
+      const t = setTimeout(() => setGreeting(null), 4500);
+      return () => clearTimeout(t);
+    } catch {}
+  }, [effectiveUser, currentView]);
 
   const isProfileComplete = () => {
     const saved = localStorage.getItem('aegis_user_profile');
@@ -216,10 +244,16 @@ export default function App() {
 
   const saveProfile = async () => {
     if (!effectiveUser) return;
+    const phoneDigits = profileData.phone.replace(/\D/g, '');
+    const guardianDigits = profileData.guardianPhone.replace(/\D/g, '');
+    if (phoneDigits.length !== 10 || guardianDigits.length !== 10) {
+      alert('Please enter a valid 10-digit phone number for both fields.');
+      return;
+    }
     const profileDataToSave = {
       name: profileData.name,
-      phone: profileData.phone,
-      emergencyContact1: { name: profileData.guardianName, phone: profileData.guardianPhone },
+      phone: phoneDigits,
+      emergencyContact1: { name: profileData.guardianName, phone: guardianDigits },
       autoReport: true,
       guardianNotifications: true,
     };
@@ -423,6 +457,19 @@ export default function App() {
         onClose={() => setIsServiceProviderOpen(false)}
       />
 
+      {/* Greeting toast */}
+      {greeting && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[95] bg-cyber-blue text-black px-4 py-2 rounded-xl text-xs font-black">
+          {greeting}
+        </div>
+      )}
+      {/* Offline indicator */}
+      {!isOnline && (
+        <div className="fixed top-4 right-4 z-[95] bg-cyber-red/80 text-white px-3 py-2 rounded-xl text-xs font-bold">
+          You are offline. Local data is still available.
+        </div>
+      )}
+
       {/* Simple Profile Prompt - Non-blocking */}
       <AnimatePresence>
         {showProfilePrompt && effectiveUser && (
@@ -452,7 +499,7 @@ export default function App() {
                       type="tel"
                       placeholder="Phone Number"
                       value={profileData.phone}
-                      onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
+                      onChange={(e) => setProfileData({ ...profileData, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyber-blue"
                     />
                     <div className="grid grid-cols-2 gap-2">
@@ -467,7 +514,7 @@ export default function App() {
                         type="tel"
                         placeholder="Guardian Phone"
                         value={profileData.guardianPhone}
-                        onChange={(e) => setProfileData({ ...profileData, guardianPhone: e.target.value })}
+                        onChange={(e) => setProfileData({ ...profileData, guardianPhone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
                         className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyber-blue"
                       />
                     </div>

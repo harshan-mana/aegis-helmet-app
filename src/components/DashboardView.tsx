@@ -266,39 +266,6 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     };
   }, []);
 
-  // Feature 1: Vehicle detection simulator
-  useEffect(() => {
-    if (!detectionActive || !isWebcamActive) {
-      setDetectedVehicles([]);
-      return;
-    }
-
-    const generateVehicles = () => {
-      const vehicleTypes = ['Motorcycle', 'Car', 'Truck', 'Scooter'];
-      const plates = [
-        'KA-01-AB-1234', 'KA-02-CD-5678', 'KA-03-EF-9012',
-        'KA-04-GH-3456', 'KA-05-IJ-7890', 'MH-12-KL-2345',
-        'DL-06-MN-6789', 'TN-07-OP-0123'
-      ];
-      const count = Math.floor(Math.random() * 4) + 1;
-      const vehicles: DetectedVehicle[] = [];
-      for (let i = 0; i < count; i++) {
-        vehicles.push({
-          id: `vehicle-${i}`,
-          plate: plates[Math.floor(Math.random() * plates.length)],
-          distance: Math.floor(Math.random() * 50) + 5,
-          speed: Math.floor(Math.random() * 80) + 20,
-          type: vehicleTypes[Math.floor(Math.random() * vehicleTypes.length)],
-        });
-      }
-      setDetectedVehicles(vehicles);
-    };
-
-    generateVehicles();
-    const interval = setInterval(generateVehicles, 3000);
-    return () => clearInterval(interval);
-  }, [detectionActive, isWebcamActive]);
-
   // Feature 7: Tracking with wifi range data
   useEffect(() => {
     if (!isTracking || !isWebcamActive) return;
