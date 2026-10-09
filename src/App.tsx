@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { SESSION_MAX_AGE_MS } from './lib/firebase';
@@ -85,23 +85,30 @@ export default function App() {
     localStorage.setItem('aegis_theme', currentTheme);
   }, [currentTheme]);
 
-  // Greeting (first-time vs returning user), persisted per account
+  // Greeting (first-time vs returning user), persisted per account.
+  // Shows once per login session for the authenticated user — not on
+  // every view change or re-render.
+  const greetedUidRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!effectiveUser) return;
+    if (!effectiveUser) { greetedUidRef.current = null; return; }
     try {
       const saved = localStorage.getItem('aegis_user_profile');
       if (!saved) return;
       const profile = JSON.parse(saved);
       if (!profile.name || !profile.phone) return;
       const uid = effectiveUser.uid || effectiveUser.email || 'anon';
+      // Only greet once per login session for this account
+      if (greetedUidRef.current === uid) return;
+      greetedUidRef.current = uid;
       const flagKey = 'aegis_seen_welcome_' + uid;
       const already = localStorage.getItem(flagKey);
-      setGreeting(already ? `Welcome back, ${profile.name}.` : `Hello, ${profile.name}. Welcome to AEGIS.`);
+      const name = profile.name;
+      setGreeting(already ? `Welcome back, ${name}!` : `Hello, ${name}! Welcome to the AEGIS app.`);
       if (!already) localStorage.setItem(flagKey, '1');
       const t = setTimeout(() => setGreeting(null), 4500);
       return () => clearTimeout(t);
     } catch {}
-  }, [effectiveUser, currentView]);
+  }, [effectiveUser]);
 
   const isProfileComplete = () => {
     const saved = localStorage.getItem('aegis_user_profile');
@@ -449,8 +456,16 @@ export default function App() {
 
       {/* Greeting toast */}
       {greeting && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[95] bg-cyber-blue text-black px-4 py-2 rounded-xl text-xs font-black">
-          {greeting}
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[95] bg-cyber-blue text-black px-4 py-2 rounded-xl text-xs font-black flex items-center gap-3 shadow-lg max-w-[90vw]">
+          <span className="truncate">{greeting}</span>
+          <button
+            type="button"
+            onClick={() => setGreeting(null)}
+            aria-label="Dismiss greeting"
+            className="shrink-0 p-1 text-black/60 hover:text-black transition-colors touch-manipulation"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
       {/* Offline indicator */}

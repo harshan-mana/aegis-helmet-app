@@ -624,7 +624,7 @@ export default function AuthorityView() {
             <div className="space-y-6">
               {/* Status Sub-filter */}
               <div className="flex items-center justify-between flex-wrap gap-4">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="text-[10px] font-black uppercase tracking-widest text-white/40">Status:</span>
                   {['All', 'Pending', 'Endorsed', 'Resolved', 'Spam'].map((st) => (
                     <button

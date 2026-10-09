@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { Chrome, Apple, Mail, X, ArrowLeft, Zap, CheckCircle2, Loader2, Lock, Shield, User, ArrowRight } from 'lucide-react';
+import { Chrome, Apple, Mail, X, ArrowLeft, Zap, CheckCircle2, Loader2, Lock, Shield, User, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, User as FirebaseUser } from 'firebase/auth';
 import { auth, googleProvider, appleProvider } from '../lib/firebase';
@@ -18,6 +18,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
   const [view, setView] = useState<'options' | 'email'>('options');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [fullName, setFullName] = useState('');
   const [isLogin, setIsLogin] = useState(true);
   const [error, setError] = useState('');
@@ -449,13 +450,22 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
                               <Lock className="w-4 h-4 text-white/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
                               <input 
                                 id="input-auth-password"
-                                type="password"
+                                type={showPassword ? 'text' : 'password'}
                                 placeholder="••••••••"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 required
-                                className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:border-cyber-blue text-white placeholder:text-white/20 transition-colors"
+                                className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-12 py-3 text-sm focus:outline-none focus:border-cyber-blue text-white placeholder:text-white/20 transition-colors"
                               />
+                              <button
+                                type="button"
+                                onClick={() => setShowPassword((s) => !s)}
+                                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                                aria-pressed={showPassword}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 text-white/40 hover:text-white transition-colors touch-manipulation"
+                              >
+                                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                              </button>
                             </div>
                           </div>
 

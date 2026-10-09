@@ -675,12 +675,13 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
               )}
             </div>
 
-            {/* Webcam controls */}
-            <div className="absolute top-4 right-4 z-40 flex items-center gap-2">
+            {/* Webcam controls — wrap within the card so they never
+                overflow or get clipped on narrow screens */}
+            <div className="absolute top-4 right-4 z-40 flex flex-wrap items-center justify-end gap-2 max-w-[calc(100%-2rem)] sm:max-w-none">
               {!isWebcamActive ? (
                 <button
                   onClick={startWebcam}
-                  className="px-4 py-2 bg-cyber-blue text-black rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-all shadow-[0_0_20px_#FF6B35]"
+                  className="px-4 py-2 bg-cyber-blue text-black rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-all shadow-[0_0_20px_#FF6B35] touch-manipulation"
                 >
                   <Camera className="w-4 h-4" />
                   Start Camera
@@ -696,7 +697,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                       stopWebcam();
                       setTimeout(() => startWebcam(), 100);
                     }}
-                    className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all"
+                    className="px-3 py-2 bg-black/60 backdrop-blur-md border border-white/15 hover:bg-black/80 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all touch-manipulation"
                     title={facingMode === 'user' ? 'Switch to Rear Camera' : 'Switch to Front Camera'}
                   >
                     <Camera className="w-4 h-4" />
@@ -704,10 +705,10 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                   </button>
                   <button
                     onClick={() => setDetectionActive(!detectionActive)}
-                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all ${
+                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all touch-manipulation ${
                       detectionActive
                         ? 'bg-cyber-purple text-black shadow-[0_0_20px_#FF8C69]'
-                        : 'bg-white/10 text-white hover:bg-white/20'
+                        : 'bg-black/60 backdrop-blur-md border border-white/15 text-white hover:bg-black/80'
                     }`}
                   >
                     <Crosshair className="w-4 h-4" />
@@ -750,14 +751,14 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                         }
                       }
                     }}
-                    className="px-4 py-2 bg-cyber-green text-black rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-all"
+                    className="px-4 py-2 bg-cyber-green text-black rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-all touch-manipulation"
                   >
                     <Camera className="w-4 h-4" />
                     Capture
                   </button>
                   <button
                     onClick={stopWebcam}
-                    className="px-4 py-2 bg-cyber-red text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-all"
+                    className="px-4 py-2 bg-cyber-red text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-all touch-manipulation"
                   >
                     <CameraOff className="w-4 h-4" />
                     Stop
