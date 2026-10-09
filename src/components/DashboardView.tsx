@@ -38,6 +38,7 @@ import {
   BarChart3,
   FileText,
   Download,
+  Eye,
   Monitor,
   Bot,
   Shield,
@@ -208,41 +209,79 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   } | null>(null);
   const captureResultTimerRef = useRef(0);
 
-  // Evidence management (edit metadata / confirm delete)
+  // Evidence management: view details, edit metadata, human review, delete.
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [viewingEvidence, setViewingEvidence] = useState<ViolationRecord | null>(null);
   const [editingEvidence, setEditingEvidence] = useState<{
     id: string;
     type: string;
     verificationStatus: 'confirmed' | 'unverified';
+    speed: string;
+    objects: string;
+    reviewStatus: 'pending' | 'approved' | 'rejected';
+    reviewNote: string;
   } | null>(null);
 
+  /** Patch one record inside the gallery state (keeps UI + IndexedDB in sync). */
+  const patchEvidenceInState = (id: string, patch: Partial<ViolationRecord>) => {
+    setEvidenceViolations(prev =>
+      prev.map((x) =>
+        x.id === id
+          ? { ...x, label: patch.type ?? x.label, record: { ...x.record, ...patch } }
+          : x
+      )
+    );
+    // Keep the open "view details" modal in sync with the edit.
+    setViewingEvidence(prev => (prev && prev.id === id ? { ...prev, ...patch } : prev));
+  };
+
   const downloadEvidence = (v: { id: string; url: string; record: ViolationRecord }) => {
+    // Prefer the stored Blob so the download still works even if the
+    // cached object URL was revoked; fall back to the object URL.
+    const href = v.record.blob ? URL.createObjectURL(v.record.blob) : v.url;
     const a = document.createElement('a');
-    a.href = v.url;
+    a.href = href;
     a.download = `aegis-evidence-${v.record.createdAt}-${v.id}.jpg`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    if (v.record.blob) setTimeout(() => URL.revokeObjectURL(href), 2000);
+  };
+
+  /** Cached object URL for a stored record, or undefined if it is gone. */
+  const evidenceUrlFor = (id: string) => evidenceViolations.find((x) => x.id === id)?.url;
+
+  const openEditEvidence = (record: ViolationRecord) => {
+    setEditingEvidence({
+      id: record.id,
+      type: record.type,
+      verificationStatus: record.verificationStatus || 'unverified',
+      speed: record.speed != null ? String(record.speed) : '',
+      objects: record.objects || '',
+      reviewStatus: record.reviewStatus || 'pending',
+      reviewNote: record.reviewNote || '',
+    });
   };
 
   const saveEvidenceEdit = async () => {
     if (!editingEvidence) return;
-    const ok = await updateViolation(editingEvidence.id, {
+    const trimmedSpeed = editingEvidence.speed.trim();
+    const parsedSpeed = Number(trimmedSpeed);
+    const speedValid = trimmedSpeed !== '' && Number.isFinite(parsedSpeed);
+    // Only include speed when the user entered a valid number, so a blank
+    // field never erases the originally captured measurement.
+    const updates: Partial<ViolationRecord> = {
       type: editingEvidence.type,
       verificationStatus: editingEvidence.verificationStatus,
-    });
+      objects: editingEvidence.objects,
+      reviewStatus: editingEvidence.reviewStatus,
+      reviewNote: editingEvidence.reviewNote,
+    };
+    if (speedValid) updates.speed = parsedSpeed;
+
+    const ok = await updateViolation(editingEvidence.id, updates);
     if (ok) {
-      setEvidenceViolations(prev =>
-        prev.map((x) =>
-          x.id === editingEvidence.id
-            ? {
-                ...x,
-                label: editingEvidence.type,
-                record: { ...x.record, type: editingEvidence.type, verificationStatus: editingEvidence.verificationStatus },
-              }
-            : x
-        )
-      );
+      patchEvidenceInState(editingEvidence.id, updates);
     } else {
       setStorageError('Could not update evidence metadata.');
     }
@@ -1102,10 +1141,27 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {evidenceViolations.map((v) => (
                   <div key={v.id} className="relative group">
-                    <img src={v.url} alt={`Evidence ${v.label}`} className="w-full h-24 object-cover rounded-xl border border-white/10" />
+                    <button
+                      type="button"
+                      onClick={() => setViewingEvidence(v.record)}
+                      aria-label={`View details for evidence ${v.label}`}
+                      className="block w-full touch-manipulation"
+                    >
+                      <img
+                        src={v.url}
+                        alt={`Evidence ${v.label}`}
+                        onError={(e) => {
+                          // Gracefully handle a missing / corrupted image file.
+                          const el = e.currentTarget;
+                          el.style.visibility = 'hidden';
+                          el.setAttribute('data-broken', '1');
+                        }}
+                        className="w-full h-24 object-cover rounded-xl border border-white/10"
+                      />
+                    </button>
                     {/* verification status badge */}
                     <span
-                      className={`absolute top-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${
+                      className={`absolute top-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase pointer-events-none ${
                         v.record.verificationStatus === 'confirmed'
                           ? 'bg-cyber-green text-black'
                           : 'bg-cyber-orange text-black'
@@ -1113,14 +1169,30 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                     >
                       {v.record.verificationStatus === 'confirmed' ? 'Confirmed' : 'Unverified'}
                     </span>
+                    {/* review status badge (human workflow) */}
+                    {v.record.reviewStatus && v.record.reviewStatus !== 'pending' && (
+                      <span
+                        className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase pointer-events-none ${
+                          v.record.reviewStatus === 'approved'
+                            ? 'bg-cyber-blue text-black'
+                            : 'bg-cyber-red text-white'
+                        }`}
+                      >
+                        {v.record.reviewStatus === 'approved' ? 'Reviewed' : 'Rejected'}
+                      </span>
+                    )}
                     {/* actions — always visible so they work on touch */}
                     <div className="absolute top-1 right-1 flex gap-1">
+                      <button onClick={() => setViewingEvidence(v.record)} aria-label="View evidence details" title="View details"
+                        className="p-1 bg-black/70 text-white rounded-lg hover:bg-black/90 touch-manipulation">
+                        <Eye className="w-3 h-3" />
+                      </button>
                       <button onClick={() => downloadEvidence(v)} aria-label="Download evidence" title="Download"
                         className="p-1 bg-black/70 text-white rounded-lg hover:bg-black/90 touch-manipulation">
                         <Download className="w-3 h-3" />
                       </button>
                       <button
-                        onClick={() => setEditingEvidence({ id: v.id, type: v.record.type, verificationStatus: v.record.verificationStatus || 'unverified' })}
+                        onClick={() => openEditEvidence(v.record)}
                         aria-label="Edit evidence" title="Edit"
                         className="p-1 bg-black/70 text-white rounded-lg hover:bg-black/90 touch-manipulation"
                       >
@@ -1154,10 +1226,95 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
             </div>
           )}
 
-          {/* Edit evidence metadata modal */}
+          {/* View evidence details (read-only) */}
+          {viewingEvidence && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+              <div className="w-full max-w-md max-h-[90vh] overflow-y-auto p-5 bg-[#14100D] border border-white/10 rounded-2xl">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-black text-white">Evidence details</h3>
+                  <button type="button" onClick={() => setViewingEvidence(null)} aria-label="Close details"
+                    className="p-1 text-white/40 hover:text-white touch-manipulation">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {evidenceUrlFor(viewingEvidence.id) ? (
+                  <img
+                    src={evidenceUrlFor(viewingEvidence.id)}
+                    alt={`Evidence ${viewingEvidence.type}`}
+                    onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
+                    className="w-full max-h-[40vh] object-contain rounded-xl border border-white/10 mb-4 bg-black"
+                  />
+                ) : (
+                  <div className="w-full py-8 mb-4 px-3 text-center text-[10px] text-white/40 bg-black/40 rounded-xl border border-white/10">
+                    Image file is missing or could not be read. The metadata below is still available.
+                  </div>
+                )}
+
+                <div className="space-y-2 text-[11px]">
+                  {[
+                    ['Type', viewingEvidence.type],
+                    ['Verification', viewingEvidence.verificationStatus || 'unverified'],
+                    ['Review', viewingEvidence.reviewStatus || 'pending'],
+                    ['Captured', new Date(viewingEvidence.createdAt).toLocaleString()],
+                    ['Speed', viewingEvidence.speed != null ? `${viewingEvidence.speed} km/h` : 'Not recorded'],
+                    ['Confidence', viewingEvidence.confidence != null ? `${viewingEvidence.confidence}%` : 'Not recorded'],
+                    ['Vehicle class', viewingEvidence.vehicleClass || 'Not recorded'],
+                    ['Detected objects', viewingEvidence.objects || 'None'],
+                    ['GPS', viewingEvidence.lat != null && viewingEvidence.lng != null
+                      ? `${viewingEvidence.lat.toFixed(5)}, ${viewingEvidence.lng.toFixed(5)}`
+                      : 'No GPS fix'],
+                  ].map(([k, val]) => (
+                    <div key={k as string} className="flex items-start justify-between gap-3 bg-white/5 rounded-lg px-3 py-2">
+                      <span className="text-white/40 font-black uppercase text-[9px] tracking-widest shrink-0">{k}</span>
+                      <span className="text-white/80 text-right break-all">{val}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {viewingEvidence.reasons && viewingEvidence.reasons.length > 0 && (
+                  <div className="mt-3 bg-white/5 rounded-lg px-3 py-2">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-1">Verification reasons</p>
+                    <ul className="text-[10px] text-white/60 space-y-0.5 list-disc list-inside">
+                      {viewingEvidence.reasons.map((r, i) => (<li key={i}>{r}</li>))}
+                    </ul>
+                  </div>
+                )}
+
+                {viewingEvidence.reviewNote && (
+                  <div className="mt-2 bg-white/5 rounded-lg px-3 py-2">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-1">Review note</p>
+                    <p className="text-[10px] text-white/70">{viewingEvidence.reviewNote}</p>
+                  </div>
+                )}
+
+                <div className="flex gap-2 mt-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const item = evidenceViolations.find((x) => x.id === viewingEvidence.id);
+                      if (item) downloadEvidence(item);
+                    }}
+                    className="flex-1 py-2.5 bg-cyber-green text-black rounded-xl text-xs font-black touch-manipulation"
+                  >
+                    Download
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { openEditEvidence(viewingEvidence); setViewingEvidence(null); }}
+                    className="flex-1 py-2.5 bg-cyber-blue text-black rounded-xl text-xs font-black touch-manipulation"
+                  >
+                    Edit
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Edit evidence metadata modal (image is never modified) */}
           {editingEvidence && (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
-              <div className="w-full max-w-sm p-5 bg-[#14100D] border border-white/10 rounded-2xl">
+              <div className="w-full max-w-sm max-h-[90vh] overflow-y-auto p-5 bg-[#14100D] border border-white/10 rounded-2xl">
                 <h3 className="text-sm font-black text-white mb-4">Edit evidence</h3>
                 <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">Type</label>
                 <input
@@ -1166,8 +1323,26 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                   onChange={(e) => setEditingEvidence({ ...editingEvidence, type: e.target.value })}
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white mb-3 focus:outline-none focus:border-cyber-blue"
                 />
+                <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">
+                  Speed (km/h) — blank keeps captured value
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  value={editingEvidence.speed}
+                  onChange={(e) => setEditingEvidence({ ...editingEvidence, speed: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white mb-3 focus:outline-none focus:border-cyber-blue"
+                />
+                <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">Detected objects</label>
+                <input
+                  type="text"
+                  value={editingEvidence.objects}
+                  onChange={(e) => setEditingEvidence({ ...editingEvidence, objects: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white mb-3 focus:outline-none focus:border-cyber-blue"
+                />
                 <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">Verification status</label>
-                <div className="flex gap-2 mb-5">
+                <div className="flex gap-2 mb-3">
                   {(['confirmed', 'unverified'] as const).map((s) => (
                     <button key={s} type="button"
                       onClick={() => setEditingEvidence({ ...editingEvidence, verificationStatus: s })}
@@ -1180,6 +1355,31 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                     </button>
                   ))}
                 </div>
+                <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">Review status</label>
+                <div className="flex gap-2 mb-3">
+                  {(['pending', 'approved', 'rejected'] as const).map((s) => (
+                    <button key={s} type="button"
+                      onClick={() => setEditingEvidence({ ...editingEvidence, reviewStatus: s })}
+                      className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase touch-manipulation ${
+                        editingEvidence.reviewStatus === s
+                          ? s === 'approved' ? 'bg-cyber-blue text-black'
+                            : s === 'rejected' ? 'bg-cyber-red text-white'
+                            : 'bg-white/20 text-white'
+                          : 'bg-white/5 text-white/50 border border-white/10'
+                      }`}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">Review note</label>
+                <textarea
+                  rows={2}
+                  value={editingEvidence.reviewNote}
+                  onChange={(e) => setEditingEvidence({ ...editingEvidence, reviewNote: e.target.value })}
+                  placeholder="Optional note for the audit trail"
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white mb-3 focus:outline-none focus:border-cyber-blue resize-y"
+                />
+                <p className="text-[9px] text-white/30 mb-4">The original captured image is always preserved.</p>
                 <div className="flex gap-2">
                   <button onClick={() => setEditingEvidence(null)}
                     className="flex-1 py-2.5 bg-white/5 border border-white/10 text-white/70 rounded-xl text-xs font-bold touch-manipulation">Cancel</button>

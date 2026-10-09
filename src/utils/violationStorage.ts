@@ -13,6 +13,9 @@ export interface ViolationRecord {
   verificationStatus?: 'confirmed' | 'unverified';
   reasons?: string[];
   vehicleClass?: string;
+  // Human review workflow — set by the user, never by the detector.
+  reviewStatus?: 'pending' | 'approved' | 'rejected';
+  reviewNote?: string;
 }
 
 const DB_NAME = 'aegis_violations';

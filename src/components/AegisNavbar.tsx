@@ -300,7 +300,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 sm:gap-4">
               {features.filter(f => f.enabled).map((f, idx) => {
                 const Icon = getIcon(f.icon);
                 const palette = [
@@ -313,11 +313,11 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
                 ][idx % 6];
                 return (
                   <button key={f.id} onClick={() => handleFeatureClick(f.route)}
-                    className="flex flex-col items-center gap-2 p-2 rounded-2xl hover:bg-white/5 transition-all group">
+                    className="flex flex-col items-center gap-2 p-2 rounded-2xl hover:bg-white/5 transition-all group min-w-0 w-full">
                     <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${palette} border border-white/10 flex items-center justify-center group-hover:scale-105 transition-all`}>
                       <Icon className="w-7 h-7 text-white" />
                     </div>
-                    <span className="text-[11px] font-semibold text-white/80 group-hover:text-white text-center leading-tight">{f.name}</span>
+                    <span className="text-[11px] font-semibold text-white/80 group-hover:text-white text-center leading-tight break-words">{f.name}</span>
                   </button>
                 );
               })}
