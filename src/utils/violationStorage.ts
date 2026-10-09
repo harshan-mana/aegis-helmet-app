@@ -9,6 +9,10 @@ export interface ViolationRecord {
   lat?: number | null;
   lng?: number | null;
   blob: Blob;
+  // Verification metadata (additive — older records simply omit these)
+  verificationStatus?: 'confirmed' | 'unverified';
+  reasons?: string[];
+  vehicleClass?: string;
 }
 
 const DB_NAME = 'aegis_violations';
@@ -86,6 +90,44 @@ export async function deleteViolation(id: string): Promise<boolean> {
       tx.oncomplete = () => resolve(true);
       tx.onerror = () => resolve(false);
     } catch {
+      resolve(false);
+    }
+  });
+}
+
+/**
+ * Update a record's metadata WITHOUT replacing the original image.
+ * The blob (original captured evidence) is always preserved.
+ */
+export async function updateViolation(
+  id: string,
+  updates: Partial<Omit<ViolationRecord, 'id' | 'blob' | 'createdAt'>>
+): Promise<boolean> {
+  const db = await openDB();
+  if (!db) return false;
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE, 'readwrite');
+      const store = tx.objectStore(STORE);
+      const getReq = store.get(id);
+      getReq.onsuccess = () => {
+        const rec = getReq.result as ViolationRecord | undefined;
+        if (!rec) return;
+        // Preserve the original image blob and creation time.
+        const merged: ViolationRecord = {
+          ...rec,
+          ...updates,
+          id: rec.id,
+          createdAt: rec.createdAt,
+          blob: rec.blob,
+        };
+        store.put(merged);
+      };
+      getReq.onerror = () => resolve(false);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    } catch (e) {
+      console.error('updateViolation error:', e);
       resolve(false);
     }
   });

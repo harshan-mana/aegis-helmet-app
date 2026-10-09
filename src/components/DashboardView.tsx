@@ -37,6 +37,7 @@ import {
   LogIn,
   BarChart3,
   FileText,
+  Download,
   Monitor,
   Bot,
   Shield,
@@ -46,7 +47,9 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import * as Dialog from '@radix-ui/react-dialog';
 import type * as cocoSsd from '@tensorflow-models/coco-ssd';
-import { saveViolation, getAllViolations, deleteViolation, ViolationRecord } from '../utils/violationStorage';
+import { saveViolation, getAllViolations, deleteViolation, updateViolation, ViolationRecord } from '../utils/violationStorage';
+import { toDetectedLabel, isVehicleClass, VEHICLE_SUBTYPE_LIMITATION } from '../utils/vehicleClassification';
+import { DEFAULT_VERIFICATION_CONFIG, verifyCandidate, VerificationTracker } from '../utils/violationVerification';
 
 interface EmergencyContact {
   id: string;
@@ -159,6 +162,73 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   const lastInferRef = useRef(0);
   const rafRef = useRef(0);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
+
+  // Violation verification (cross-checking pipeline).
+  // Single source of truth for candidate evaluation + temporal
+  // consistency + de-dup. Configurable thresholds live in
+  // violationVerification.ts (DEFAULT_VERIFICATION_CONFIG).
+  const verificationRef = useRef(new VerificationTracker(DEFAULT_VERIFICATION_CONFIG));
+  const [captureResult, setCaptureResult] = useState<{
+    status: 'confirmed' | 'unverified' | 'rejected';
+    violationType: string | null;
+    reasons: string[];
+  } | null>(null);
+  const captureResultTimerRef = useRef(0);
+
+  // Evidence management (edit metadata / confirm delete)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [editingEvidence, setEditingEvidence] = useState<{
+    id: string;
+    type: string;
+    verificationStatus: 'confirmed' | 'unverified';
+  } | null>(null);
+
+  const downloadEvidence = (v: { id: string; url: string; record: ViolationRecord }) => {
+    const a = document.createElement('a');
+    a.href = v.url;
+    a.download = `aegis-evidence-${v.record.createdAt}-${v.id}.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const saveEvidenceEdit = async () => {
+    if (!editingEvidence) return;
+    const ok = await updateViolation(editingEvidence.id, {
+      type: editingEvidence.type,
+      verificationStatus: editingEvidence.verificationStatus,
+    });
+    if (ok) {
+      setEvidenceViolations(prev =>
+        prev.map((x) =>
+          x.id === editingEvidence.id
+            ? {
+                ...x,
+                label: editingEvidence.type,
+                record: { ...x.record, type: editingEvidence.type, verificationStatus: editingEvidence.verificationStatus },
+              }
+            : x
+        )
+      );
+    } else {
+      setStorageError('Could not update evidence metadata.');
+    }
+    setEditingEvidence(null);
+  };
+
+  const confirmDeleteEvidence = async (id: string) => {
+    const ok = await deleteViolation(id);
+    if (ok) {
+      setEvidenceViolations(prev => {
+        const target = prev.find((x) => x.id === id);
+        if (target) URL.revokeObjectURL(target.url);
+        return prev.filter((x) => x.id !== id);
+      });
+    } else {
+      setStorageError('Could not delete evidence.');
+    }
+    setConfirmDeleteId(null);
+  };
 
   // Feature 1: Detected vehicles with license plates
   const [detectedVehicles, setDetectedVehicles] = useState<DetectedVehicle[]>([]);
@@ -390,6 +460,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
             const preds = await modelRef.current.detect(v);
             const filtered = preds.filter((p) => p.score >= 0.5);
             lastPredictionsRef.current = filtered;
+            verificationRef.current.updateFrame(filtered.map((p) => p.class));
             const classes = filtered.map((p) => p.class).join(',');
             if (classes !== lastClassesRef.current) {
               lastClassesRef.current = classes;
@@ -415,7 +486,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
             ctx.strokeStyle = '#FF6B35';
             ctx.lineWidth = 2;
             ctx.strokeRect(x * sx, y * sy, w * sx, h * sy);
-            const label = `${p.class} • ${Math.round(p.score * 100)}%`;
+            const label = `${toDetectedLabel(p.class, p.score).label} • ${Math.round(p.score * 100)}%`;
             ctx.font = 'bold 12px monospace';
             const tw = ctx.measureText(label).width;
             ctx.fillStyle = 'rgba(0,0,0,0.7)';
@@ -725,25 +796,84 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                           ctx.drawImage(videoRef.current, 0, 0);
                           const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
                           setCapturedImages(prev => [...prev, dataUrl]);
-                          // Persist evidence image locally
+                          // Cross-check the detection BEFORE saving any violation.
+                          const now = Date.now();
+                          const top = lastPredictionsRef.current
+                            .slice()
+                            .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0];
+                          const rawClass = top?.class || 'manual_capture';
+                          const confidence = top?.score ?? 0;
+                          const streak = verificationRef.current.streakFor(rawClass);
+                          const minConf = DEFAULT_VERIFICATION_CONFIG.minDetectionConfidence;
+                          let candidate;
+                          if (top && confidence >= minConf) {
+                            candidate = verifyCandidate(DEFAULT_VERIFICATION_CONFIG, {
+                              detectedClass: rawClass,
+                              confidence,
+                              speedKmh,
+                              hasGpsFix: gpsStatus === 'locked',
+                              isVehicle: isVehicleClass(rawClass),
+                              frameStreak: streak,
+                              now,
+                            });
+                          } else {
+                            // No qualifying detection — preserve the manual capture
+                            // as an UNVERIFIED candidate (never a confirmed violation).
+                            candidate = {
+                              status: 'unverified' as const,
+                              violationType: null,
+                              reasons: [
+                                top
+                                  ? `Confidence ${(confidence * 100).toFixed(0)}% below minimum ${(minConf * 100).toFixed(0)}%`
+                                  : 'No active detection — manual capture',
+                                'Saved as UNVERIFIED candidate for human review (not a confirmed violation)',
+                              ],
+                            };
+                          }
+                          // De-dup: suppress a duplicate of the same continuing event.
+                          if (candidate.violationType && verificationRef.current.isDuplicate(candidate.violationType, now)) {
+                            setCaptureResult({
+                              status: 'unverified',
+                              violationType: candidate.violationType,
+                              reasons: ['Duplicate suppressed — same violation event captured recently'],
+                            });
+                            if (captureResultTimerRef.current) clearTimeout(captureResultTimerRef.current);
+                            captureResultTimerRef.current = setTimeout(() => setCaptureResult(null), 6000);
+                            return;
+                          }
+                          // Persist the original image + verified metadata.
                           try {
                             const resp = await fetch(dataUrl);
                             const blob = await resp.blob();
-                            const id = `${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+                            const id = `${now}_${Math.floor(Math.random() * 1e6)}`;
                             const record: ViolationRecord = {
                               id,
-                              type: detectedObjects[0] || 'capture',
-                              createdAt: Date.now(),
+                              type: candidate.violationType || rawClass,
+                              createdAt: now,
                               speed: speedKmh,
                               objects: detectedObjects.join(', '),
-                              confidence: detectionConfidence,
+                              confidence: Math.round(confidence * 100),
                               lat: gpsCoords?.lat ?? null,
                               lng: gpsCoords?.lng ?? null,
                               blob,
+                              verificationStatus: candidate.status === 'confirmed' ? 'confirmed' : 'unverified',
+                              reasons: candidate.reasons,
+                              vehicleClass: rawClass,
                             };
                             const ok = await saveViolation(record);
-                            if (!ok) setStorageError('Evidence could not be saved locally.');
-                            else setEvidenceViolations(prev => [{ id, url: URL.createObjectURL(blob), label: record.type, record }, ...prev]);
+                            if (!ok) {
+                              setStorageError('Evidence could not be saved locally.');
+                            } else {
+                              if (candidate.violationType) verificationRef.current.markSaved(candidate.violationType, now);
+                              setEvidenceViolations(prev => [{ id, url: URL.createObjectURL(blob), label: record.type, record }, ...prev]);
+                              setCaptureResult({
+                                status: candidate.status === 'confirmed' ? 'confirmed' : 'unverified',
+                                violationType: candidate.violationType,
+                                reasons: candidate.reasons,
+                              });
+                              if (captureResultTimerRef.current) clearTimeout(captureResultTimerRef.current);
+                              captureResultTimerRef.current = setTimeout(() => setCaptureResult(null), 6000);
+                            }
                           } catch (e) {
                             console.error('Violation save failed:', e);
                             setStorageError('Evidence could not be saved locally.');
@@ -800,7 +930,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                       <div className="flex flex-wrap gap-2 justify-center">
                         {detectedObjects.map((obj, i) => (
                           <span key={i} className="px-2 py-1 bg-cyber-purple/20 border border-cyber-purple/40 rounded text-[10px] font-mono text-cyber-purple uppercase">
-                            {obj}
+                            {toDetectedLabel(obj, 0).label}
                           </span>
                         ))}
                       </div>
@@ -890,18 +1020,89 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                 {evidenceViolations.map((v) => (
                   <div key={v.id} className="relative group">
                     <img src={v.url} alt={`Evidence ${v.label}`} className="w-full h-24 object-cover rounded-xl border border-white/10" />
-                    <button
-                      onClick={() => {
-                        deleteViolation(v.id);
-                        URL.revokeObjectURL(v.url);
-                        setEvidenceViolations(prev => prev.filter(x => x.id !== v.id));
-                      }}
-                      className="absolute top-1 right-1 p-1 bg-cyber-red/80 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                    {/* verification status badge */}
+                    <span
+                      className={`absolute top-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${
+                        v.record.verificationStatus === 'confirmed'
+                          ? 'bg-cyber-green text-black'
+                          : 'bg-cyber-orange text-black'
+                      }`}
                     >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+                      {v.record.verificationStatus === 'confirmed' ? 'Confirmed' : 'Unverified'}
+                    </span>
+                    {/* actions — always visible so they work on touch */}
+                    <div className="absolute top-1 right-1 flex gap-1">
+                      <button onClick={() => downloadEvidence(v)} aria-label="Download evidence" title="Download"
+                        className="p-1 bg-black/70 text-white rounded-lg hover:bg-black/90 touch-manipulation">
+                        <Download className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => setEditingEvidence({ id: v.id, type: v.record.type, verificationStatus: v.record.verificationStatus || 'unverified' })}
+                        aria-label="Edit evidence" title="Edit"
+                        className="p-1 bg-black/70 text-white rounded-lg hover:bg-black/90 touch-manipulation"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                      <button onClick={() => setConfirmDeleteId(v.id)} aria-label="Delete evidence" title="Delete"
+                        className="p-1 bg-cyber-red/80 text-white rounded-lg hover:bg-cyber-red touch-manipulation">
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <p className="text-[9px] font-mono text-white/60 mt-1 truncate">{v.label}</p>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Delete confirmation modal */}
+          {confirmDeleteId && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+              <div className="w-full max-w-sm p-5 bg-[#14100D] border border-white/10 rounded-2xl">
+                <h3 className="text-sm font-black text-white mb-2">Delete evidence?</h3>
+                <p className="text-xs text-white/50 mb-5">This permanently deletes the captured image and its metadata. This cannot be undone.</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setConfirmDeleteId(null)}
+                    className="flex-1 py-2.5 bg-white/5 border border-white/10 text-white/70 rounded-xl text-xs font-bold touch-manipulation">Cancel</button>
+                  <button onClick={() => confirmDeleteEvidence(confirmDeleteId)}
+                    className="flex-1 py-2.5 bg-cyber-red text-white rounded-xl text-xs font-black touch-manipulation">Delete</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Edit evidence metadata modal */}
+          {editingEvidence && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+              <div className="w-full max-w-sm p-5 bg-[#14100D] border border-white/10 rounded-2xl">
+                <h3 className="text-sm font-black text-white mb-4">Edit evidence</h3>
+                <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">Type</label>
+                <input
+                  type="text"
+                  value={editingEvidence.type}
+                  onChange={(e) => setEditingEvidence({ ...editingEvidence, type: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white mb-3 focus:outline-none focus:border-cyber-blue"
+                />
+                <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">Verification status</label>
+                <div className="flex gap-2 mb-5">
+                  {(['confirmed', 'unverified'] as const).map((s) => (
+                    <button key={s} type="button"
+                      onClick={() => setEditingEvidence({ ...editingEvidence, verificationStatus: s })}
+                      className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase touch-manipulation ${
+                        editingEvidence.verificationStatus === s
+                          ? s === 'confirmed' ? 'bg-cyber-green text-black' : 'bg-cyber-orange text-black'
+                          : 'bg-white/5 text-white/50 border border-white/10'
+                      }`}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setEditingEvidence(null)}
+                    className="flex-1 py-2.5 bg-white/5 border border-white/10 text-white/70 rounded-xl text-xs font-bold touch-manipulation">Cancel</button>
+                  <button onClick={saveEvidenceEdit}
+                    className="flex-1 py-2.5 bg-cyber-blue text-black rounded-xl text-xs font-black touch-manipulation">Save</button>
+                </div>
               </div>
             </div>
           )}
@@ -913,10 +1114,10 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
             </h3>
             {detectedObjects.length > 0 ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {detectedObjects.map((obj, i) => (
+                {lastPredictionsRef.current.map((p, i) => (
                   <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
-                    <p className="text-sm font-bold text-white capitalize">{obj.replace('_', ' ')}</p>
-                    <p className="text-[9px] font-mono text-cyber-purple mt-1">Confidence: {(85 + Math.random() * 14).toFixed(1)}%</p>
+                    <p className="text-sm font-bold text-white capitalize">{toDetectedLabel(p.class, p.score).label}</p>
+                    <p className="text-[9px] font-mono text-cyber-purple mt-1">Confidence: {Math.round(p.score * 100)}%</p>
                   </div>
                 ))}
               </div>
@@ -1100,6 +1301,36 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
           )}
         </AnimatePresence>
       </Dialog.Root>
+
+      {/* Verification result toast */}
+      {captureResult && (
+        <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-[210] max-w-[92vw] px-4 py-3 rounded-2xl border shadow-2xl ${
+          captureResult.status === 'confirmed'
+            ? 'bg-cyber-green/95 border-cyber-green text-black'
+            : captureResult.status === 'unverified'
+            ? 'bg-cyber-orange/95 border-cyber-orange text-black'
+            : 'bg-cyber-red/95 border-cyber-red text-white'
+        }`}>
+          <div className="flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-black uppercase tracking-wider">
+                {captureResult.status === 'confirmed'
+                  ? `Confirmed: ${captureResult.violationType || 'Violation'}`
+                  : captureResult.status === 'unverified'
+                  ? `Candidate — requires review${captureResult.violationType ? ` (${captureResult.violationType})` : ''}`
+                  : 'Capture rejected'}
+              </p>
+              <ul className="text-[10px] font-mono mt-1 space-y-0.5 list-disc list-inside">
+                {captureResult.reasons.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </div>
+            <button onClick={() => setCaptureResult(null)} aria-label="Dismiss"
+              className="shrink-0 p-1 text-current opacity-70 hover:opacity-100 touch-manipulation">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Portal-based dropdowns - rendered to document.body to escape all clipping contexts */}
     </div>
