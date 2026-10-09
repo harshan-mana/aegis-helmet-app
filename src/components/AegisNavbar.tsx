@@ -364,7 +364,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -8 }}
         transition={{ duration: 0.15 }}
-        className="fixed w-[280px] bg-[#0d0d0f] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+        className="fixed w-[280px] max-w-[calc(100vw-16px)] bg-[#0d0d0f] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
         style={{ top: accountPos.top, left: accountPos.left, zIndex: 99999 }}
       >
         <div className="p-4 bg-white/5 border-b border-white/10">
@@ -415,7 +415,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
         className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100000]"
         onClick={() => setShowAddFeature(false)}>
         <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
-          className="bg-[#0d0d0f] border border-white/10 rounded-2xl p-6 w-[380px] mx-4"
+          className="bg-[#0d0d0f] border border-white/10 rounded-2xl p-6 w-[380px] max-w-[calc(100vw-2rem)] mx-4"
           onClick={(e) => e.stopPropagation()}>
           <h3 className="text-lg font-bold text-white mb-4">Add New AEGIS Feature</h3>
           <div className="space-y-3">
@@ -481,7 +481,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
         className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100000]"
         onClick={() => setShowLogoutConfirm(false)}>
         <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
-          className="bg-[#0d0d0f] border border-white/10 rounded-2xl p-6 w-[320px] mx-4"
+          className="bg-[#0d0d0f] border border-white/10 rounded-2xl p-6 w-[320px] max-w-[calc(100vw-2rem)] mx-4"
           onClick={(e) => e.stopPropagation()}>
           <h3 className="text-lg font-bold text-white mb-2">Log out</h3>
           <p className="text-sm text-white/60 mb-6">Are you sure you want to log out?</p>
@@ -504,7 +504,7 @@ export default function AegisNavbar({ userRole, onViewChange, currentView, onSig
         className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100000]"
         onClick={() => setShowSwitchAccount(false)}>
         <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
-          className="bg-[#0d0d0f] border border-white/10 rounded-2xl p-6 w-[380px] mx-4"
+          className="bg-[#0d0d0f] border border-white/10 rounded-2xl p-6 w-[380px] max-w-[calc(100vw-2rem)] mx-4"
           onClick={(e) => e.stopPropagation()}>
           <h3 className="text-lg font-bold text-white mb-4">Switch Account</h3>
           <div className="mb-4">

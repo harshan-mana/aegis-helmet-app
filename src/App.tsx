@@ -346,7 +346,7 @@ export default function App() {
   }
 
   return (
-    <div className={`min-h-screen ${theme.bg} transition-colors duration-500`}>
+    <div className={`min-h-screen ${theme.bg} transition-colors duration-500 overflow-x-hidden`}>
       {effectiveUser && (
         <AegisNavbar
           userRole={userRole}
