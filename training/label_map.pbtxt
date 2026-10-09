@@ -1,0 +1,40 @@
+item {
+  id: 1
+  name: 'car'
+}
+item {
+  id: 2
+  name: 'motorcycle'
+}
+item {
+  id: 3
+  name: 'scooter'
+}
+item {
+  id: 4
+  name: 'bicycle'
+}
+item {
+  id: 5
+  name: 'auto_rickshaw'
+}
+item {
+  id: 6
+  name: 'e_rickshaw'
+}
+item {
+  id: 7
+  name: 'bus'
+}
+item {
+  id: 8
+  name: 'truck'
+}
+item {
+  id: 9
+  name: 'van'
+}
+item {
+  id: 10
+  name: 'person'
+}
