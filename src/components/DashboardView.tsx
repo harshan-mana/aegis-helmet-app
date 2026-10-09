@@ -48,7 +48,16 @@ import { motion, AnimatePresence } from 'motion/react';
 import * as Dialog from '@radix-ui/react-dialog';
 import type * as cocoSsd from '@tensorflow-models/coco-ssd';
 import { saveViolation, getAllViolations, deleteViolation, updateViolation, ViolationRecord } from '../utils/violationStorage';
-import { toDetectedLabel, isVehicleClass, VEHICLE_SUBTYPE_LIMITATION } from '../utils/vehicleClassification';
+import {
+  toDetectedLabel,
+  isVehicleClass,
+  VEHICLE_SUBTYPE_LIMITATION,
+  classifyVehicle,
+  loadDedicatedModel,
+  classifyRegionsWithDedicatedModel,
+  type VehicleVerdict,
+  type VehicleSubtype,
+} from '../utils/vehicleClassification';
 import { DEFAULT_VERIFICATION_CONFIG, verifyCandidate, VerificationTracker } from '../utils/violationVerification';
 
 interface EmergencyContact {
@@ -160,7 +169,31 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   const lastPredictionsRef = useRef<cocoSsd.DetectedObject[]>([]);
   const lastClassesRef = useRef<string>('');
   const lastInferRef = useRef(0);
+
+  // Indian-vehicle classification:
+  //  - dedicatedModelRef holds trained weights if they exist at
+  //    models/indian_vehicle/model.json (verified subclass).
+  //  - lastVerdictsRef holds the latest per-detection verdicts.
+  // Both are non-blocking: with no weights the app keeps using COCO-SSD.
+  const dedicatedModelRef = useRef<import('../utils/vehicleClassification').DedicatedVehicleModel | null>(null);
+  const [dedicatedModelActive, setDedicatedModelActive] = useState(false);
+  const lastVerdictsRef = useRef<VehicleVerdict[]>([]);
+  const dedicatedResultsRef = useRef<Array<{ subtype: VehicleSubtype; score: number } | null>>([]);
+  const lastDedicatedInferRef = useRef(0);
   const rafRef = useRef(0);
+  // Try to load trained Indian-vehicle weights in the background.
+  // Absent weights are the normal case: we simply keep using COCO-SSD.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const m = await loadDedicatedModel();
+      if (cancelled) return;
+      dedicatedModelRef.current = m;
+      setDedicatedModelActive(!!m);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
 
   // Violation verification (cross-checking pipeline).
@@ -461,6 +494,43 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
             const filtered = preds.filter((p) => p.score >= 0.5);
             lastPredictionsRef.current = filtered;
             verificationRef.current.updateFrame(filtered.map((p) => p.class));
+
+            // --- Indian vehicle classification -----------------------------
+            // Trained weights (if present) resolve the true subclass on the
+            // cropped region; otherwise COCO-SSD + measured geometry gives an
+            // explicitly-unverified estimate. Never blocks the detector.
+            const frameWidth = v.videoWidth || 1;
+            const frameHeight = v.videoHeight || 1;
+            const MAX_DEDICATED_BOXES = 4;
+            if (dedicatedModelRef.current && filtered.length && t - lastDedicatedInferRef.current >= 1000) {
+              lastDedicatedInferRef.current = t;
+              const boxes = filtered.slice(0, MAX_DEDICATED_BOXES).map((p) => ({
+                x: p.bbox[0],
+                y: p.bbox[1],
+                width: p.bbox[2],
+                height: p.bbox[3],
+              }));
+              try {
+                dedicatedResultsRef.current = await classifyRegionsWithDedicatedModel(dedicatedModelRef.current, v, boxes);
+              } catch {
+                dedicatedResultsRef.current = [];
+              }
+            } else if (!dedicatedModelRef.current) {
+              dedicatedResultsRef.current = [];
+            }
+            lastVerdictsRef.current = filtered.map((p, i) => {
+              const dedicated = i < MAX_DEDICATED_BOXES ? dedicatedResultsRef.current?.[i] : null;
+              return classifyVehicle({
+                detectorClass: p.class,
+                score: p.score,
+                box: { x: p.bbox[0], y: p.bbox[1], width: p.bbox[2], height: p.bbox[3] },
+                frameWidth,
+                frameHeight,
+                dedicatedLabel: dedicated?.subtype ?? null,
+                dedicatedScore: dedicated?.score ?? null,
+              });
+            });
+
             const classes = filtered.map((p) => p.class).join(',');
             if (classes !== lastClassesRef.current) {
               lastClassesRef.current = classes;
@@ -481,19 +551,25 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
           ctx.clearRect(0, 0, c.width, c.height);
           const sx = c.width / v.videoWidth;
           const sy = c.height / v.videoHeight;
-          for (const p of lastPredictionsRef.current) {
+          lastPredictionsRef.current.forEach((p, idx) => {
             const [x, y, w, h] = p.bbox;
-            ctx.strokeStyle = '#FF6B35';
+            const verdict = lastVerdictsRef.current[idx];
+            // Green outline = verified subclass (trained model).
+            // Orange outline = heuristic / unverified estimate.
+            ctx.strokeStyle = verdict && !verdict.verified && isVehicleClass(p.class) ? '#FF8C69' : '#22c55e';
             ctx.lineWidth = 2;
             ctx.strokeRect(x * sx, y * sy, w * sx, h * sy);
-            const label = `${toDetectedLabel(p.class, p.score).label} • ${Math.round(p.score * 100)}%`;
+            const name = verdict ? verdict.label : toDetectedLabel(p.class, p.score).label;
+            const pct = verdict ? Math.round(verdict.confidence * 100) : Math.round(p.score * 100);
+            const mark = verdict && !verdict.verified && isVehicleClass(p.class) ? ' ~' : '';
+            const label = `${name}${mark} • ${pct}%`;
             ctx.font = 'bold 12px monospace';
             const tw = ctx.measureText(label).width;
             ctx.fillStyle = 'rgba(0,0,0,0.7)';
             ctx.fillRect(x * sx, Math.max(0, y * sy - 18), tw + 6, 16);
             ctx.fillStyle = '#fff';
             ctx.fillText(label, x * sx + 3, Math.max(12, y * sy - 5));
-          }
+          });
         }
       }
     };
@@ -803,6 +879,10 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                             .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0];
                           const rawClass = top?.class || 'manual_capture';
                           const confidence = top?.score ?? 0;
+                          // Latest classification verdict for the strongest box.
+                          const topIndex = top ? lastPredictionsRef.current.indexOf(top) : -1;
+                          const verdict = topIndex >= 0 ? lastVerdictsRef.current[topIndex] ?? null : null;
+                          const classified = verdict ? verdict.subtype : 'other';
                           const streak = verificationRef.current.streakFor(rawClass);
                           const minConf = DEFAULT_VERIFICATION_CONFIG.minDetectionConfidence;
                           let candidate;
@@ -830,6 +910,9 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                               ],
                             };
                           }
+                          // Attach the classification basis so the record
+                          // states exactly how the vehicle type was decided.
+                          if (verdict) candidate.reasons = [...candidate.reasons, `Classification: ${verdict.label} (${verdict.verified ? 'verified by trained model' : 'unverified heuristic'}) — ${verdict.basis}`];
                           // De-dup: suppress a duplicate of the same continuing event.
                           if (candidate.violationType && verificationRef.current.isDuplicate(candidate.violationType, now)) {
                             setCaptureResult({
@@ -858,7 +941,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                               blob,
                               verificationStatus: candidate.status === 'confirmed' ? 'confirmed' : 'unverified',
                               reasons: candidate.reasons,
-                              vehicleClass: rawClass,
+                              vehicleClass: classified,
                             };
                             const ok = await saveViolation(record);
                             if (!ok) {
@@ -928,9 +1011,9 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                       className="border-2 border-cyber-purple/60 rounded-lg p-4 bg-black/40 backdrop-blur-sm"
                     >
                       <div className="flex flex-wrap gap-2 justify-center">
-                        {detectedObjects.map((obj, i) => (
-                          <span key={i} className="px-2 py-1 bg-cyber-purple/20 border border-cyber-purple/40 rounded text-[10px] font-mono text-cyber-purple uppercase">
-                            {toDetectedLabel(obj, 0).label}
+                        {[...new Set(lastVerdictsRef.current.map((v) => v.label))].map((label) => (
+                          <span key={label} className="px-2 py-1 bg-cyber-purple/20 border border-cyber-purple/40 rounded text-[10px] font-mono text-cyber-purple uppercase">
+                            {label}
                           </span>
                         ))}
                       </div>
@@ -1113,14 +1196,29 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
               <Crosshair className="w-4 h-4 text-cyber-purple" /> YOLOv8 Detection Results
             </h3>
             {detectedObjects.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {lastPredictionsRef.current.map((p, i) => (
-                  <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
-                    <p className="text-sm font-bold text-white capitalize">{toDetectedLabel(p.class, p.score).label}</p>
-                    <p className="text-[9px] font-mono text-cyber-purple mt-1">Confidence: {Math.round(p.score * 100)}%</p>
-                  </div>
-                ))}
-              </div>
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {lastVerdictsRef.current.map((v, i) => (
+                    <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
+                      <p className="text-sm font-bold text-white">{v.label}</p>
+                      <p className="text-[9px] font-mono text-cyber-purple mt-1">Confidence: {Math.round(v.confidence * 100)}%</p>
+                      <span
+                        className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${
+                          v.verified ? 'bg-cyber-green/20 text-cyber-green' : 'bg-cyber-orange/20 text-cyber-orange'
+                        }`}
+                      >
+                        {v.verified ? 'Verified' : 'Heuristic'}
+                      </span>
+                      <p className="text-[8px] font-mono text-white/30 mt-1 leading-tight">{v.basis}</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[9px] font-mono text-white/30 mt-3 leading-relaxed">
+                  {dedicatedModelActive
+                    ? 'Trained Indian-vehicle classifier active — verified subclasses.'
+                    : VEHICLE_SUBTYPE_LIMITATION}
+                </p>
+              </>
             ) : (
               <div className="text-center py-8 text-white/20 text-xs">
                 <Crosshair className="w-10 h-10 mx-auto mb-2 opacity-20" />
