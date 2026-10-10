@@ -123,7 +123,8 @@ export default function SettingsView() {
 
   const validateInputs = () => {
     if (!profile) return false;
-    const phoneRegex = /^\d{10,15}$/;
+    // Primary mobile must be exactly 10 digits.
+    const phoneRegex = /^\d{10}$/;
     const nameRegex = /^[a-zA-Z\s]+$/;
     const newErrors: { [key: string]: string } = {};
 
@@ -145,7 +146,7 @@ export default function SettingsView() {
       profile.emergencyContact1.phone.trim() !== '' &&
       !phoneRegex.test(profile.emergencyContact1.phone)
     ) {
-      newErrors['emergencyContact1.phone'] = '10-15 digits only';
+      newErrors['emergencyContact1.phone'] = 'Exactly 10 digits only';
     }
 
     setErrors(newErrors);
@@ -415,9 +416,14 @@ export default function SettingsView() {
                       </label>
                       <input
                         type="tel"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={10}
                         value={profile?.phone || ''}
-                        onChange={(e) => handleTextChange(e.target.value, 'phone')}
-                        placeholder="10-15 digits"
+                        onChange={(e) =>
+                          handleTextChange(e.target.value.replace(/\D/g, '').slice(0, 10), 'phone')
+                        }
+                        placeholder="Enter 10-digit mobile number"
                         className={`w-full bg-white/5 border p-4 rounded-xl text-sm font-bold text-white focus:outline-none focus:border-cyber-blue transition-all ${
                           errors.phone ? 'border-cyber-red' : 'border-white/10'
                         }`}
@@ -442,10 +448,13 @@ export default function SettingsView() {
                         Blood Group (Emergency Medical)
                       </label>
                       <select
-                        value={profile?.bloodGroup || 'O+'}
+                        value={profile?.bloodGroup || ''}
                         onChange={(e) => handleTextChange(e.target.value, 'bloodGroup')}
                         className="w-full bg-white/5 border border-white/10 p-4 rounded-xl text-sm font-bold text-white focus:outline-none focus:border-cyber-blue"
                       >
+                        <option value="" className="bg-black text-white/50">
+                          Enter your blood group
+                        </option>
                         {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((bg) => (
                           <option key={bg} value={bg} className="bg-black text-white">
                             {bg}

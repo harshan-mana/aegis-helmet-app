@@ -72,7 +72,7 @@ export default function ViolationsView() {
       name: '',
       phone: '',
       licenseNumber: '',
-      bloodGroup: 'O+',
+      bloodGroup: '',
       autoReport: true,
       guardianNotifications: true,
     };
@@ -498,6 +498,7 @@ export default function ViolationsView() {
                     onChange={(e) => setProfileDraft({ ...profileDraft, bloodGroup: e.target.value })}
                     className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyber-blue"
                   >
+                    <option value="" className="bg-black text-white/50">Enter your blood group</option>
                     {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((bg) => (
                       <option key={bg} value={bg} className="bg-black text-white">{bg}</option>
                     ))}

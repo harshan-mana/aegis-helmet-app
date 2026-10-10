@@ -1162,9 +1162,17 @@ export default function AuthorityView() {
                     </label>
                     <input
                       type="tel"
-                      placeholder="10-15 digits"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={10}
+                      placeholder="Enter 10-digit mobile number"
                       value={vehicleForm.ownerPhone}
-                      onChange={(e) => setVehicleForm({ ...vehicleForm, ownerPhone: e.target.value })}
+                      onChange={(e) =>
+                        setVehicleForm({
+                          ...vehicleForm,
+                          ownerPhone: e.target.value.replace(/\D/g, '').slice(0, 10),
+                        })
+                      }
                       className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:border-cyber-blue"
                     />
                     {formErrors.ownerPhone && (

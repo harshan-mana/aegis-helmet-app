@@ -85,29 +85,25 @@ export default function App() {
     localStorage.setItem('aegis_theme', currentTheme);
   }, [currentTheme]);
 
-  // Greeting (first-time vs returning user), persisted per account.
-  // Shows once per login session for the authenticated user — not on
-  // every view change or re-render.
+  // Login welcome toast. First-time vs returning is persisted per account, so a
+  // refresh never replays the first-time message. Shows once per login session
+  // and dismisses itself after 3500ms with a smooth fade.
   const greetedUidRef = useRef<string | null>(null);
   useEffect(() => {
     if (!effectiveUser) { greetedUidRef.current = null; return; }
+    const uid = effectiveUser.uid || effectiveUser.email || 'anon';
+    // Only greet once per login session for this account.
+    if (greetedUidRef.current === uid) return;
+    greetedUidRef.current = uid;
+    let already = false;
     try {
-      const saved = localStorage.getItem('aegis_user_profile');
-      if (!saved) return;
-      const profile = JSON.parse(saved);
-      if (!profile.name || !profile.phone) return;
-      const uid = effectiveUser.uid || effectiveUser.email || 'anon';
-      // Only greet once per login session for this account
-      if (greetedUidRef.current === uid) return;
-      greetedUidRef.current = uid;
       const flagKey = 'aegis_seen_welcome_' + uid;
-      const already = localStorage.getItem(flagKey);
-      const name = profile.name;
-      setGreeting(already ? `Welcome back, ${name}!` : `Hello, ${name}! Welcome to the AEGIS app.`);
-      if (!already) localStorage.setItem(flagKey, '1');
-      const t = setTimeout(() => setGreeting(null), 4500);
-      return () => clearTimeout(t);
+      already = localStorage.getItem(flagKey) === '1';
+      localStorage.setItem(flagKey, '1');
     } catch {}
+    setGreeting(already ? 'Welcome back to the Aegis application' : 'Hello Welcome to the Aegis application');
+    const t = setTimeout(() => setGreeting(null), 3500);
+    return () => clearTimeout(t);
   }, [effectiveUser]);
 
   const isProfileComplete = () => {
@@ -117,6 +113,23 @@ export default function App() {
       return profile.name && profile.phone && profile.emergencyContact1?.name && profile.emergencyContact1?.phone;
     }
     return false;
+  };
+
+  // The "Complete Your Profile" prompt shows only ONCE per user. Once it is
+  // dismissed (Skip, Save, or the X button) the flag is persisted per account
+  // so it never re-appears on refresh or navigation.
+  const profilePromptKey = (uid: string) => `aegis_profile_prompt_dismissed_${uid}`;
+  const currentProfileUid = () => effectiveUser?.uid || effectiveUser?.email || 'anon';
+  const hasSeenProfilePrompt = (uid: string) => {
+    try { return localStorage.getItem(profilePromptKey(uid)) === 'true'; } catch { return false; }
+  };
+  const markProfilePromptSeen = (uid: string) => {
+    try { localStorage.setItem(profilePromptKey(uid), 'true'); } catch {}
+  };
+  /** Guarded replacement for setShowProfilePrompt(true). */
+  const requestProfilePrompt = () => {
+    if (hasSeenProfilePrompt(currentProfileUid())) return;
+    setShowProfilePrompt(true);
   };
 
   useEffect(() => {
@@ -147,7 +160,7 @@ export default function App() {
             const data = snapshot.data();
             setUserRole(data.role || 'Driver');
             if (!data.phone || !data.emergencyContact1?.phone) {
-              setShowProfilePrompt(true);
+              requestProfilePrompt();
             }
           } else {
             handleNewUser(u.uid, u.email || '');
@@ -164,7 +177,7 @@ export default function App() {
         } else {
           setUserRole(localUser.role || 'Driver');
           if (!isProfileComplete()) {
-            setShowProfilePrompt(true);
+            requestProfilePrompt();
           }
         }
         setLoading(false);
@@ -201,7 +214,7 @@ export default function App() {
     }
     handleAuthSuccess(guest);
     if (!isProfileComplete()) {
-      setShowProfilePrompt(true);
+      requestProfilePrompt();
     }
   };
 
@@ -242,7 +255,7 @@ export default function App() {
         guardianNotifications: false
       });
       setUserRole(defaultRole);
-      setShowProfilePrompt(true);
+      requestProfilePrompt();
       setCurrentView('dashboard');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${uid}`);
@@ -272,11 +285,16 @@ export default function App() {
         handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
       }
     }
+    // Persist so the prompt never returns for this account.
+    markProfilePromptSeen(currentProfileUid());
     setShowProfilePrompt(false);
     setProfileData({ name: '', phone: '', guardianName: '', guardianPhone: '' });
   };
 
-  const skipProfile = () => setShowProfilePrompt(false);
+  const skipProfile = () => {
+    markProfilePromptSeen(currentProfileUid());
+    setShowProfilePrompt(false);
+  };
 
   const theme = THEMES.find(t => t.id === currentTheme) || THEMES[0];
 
@@ -340,7 +358,7 @@ export default function App() {
       setShowLanding(false);
       // Check if profile is complete
       if (!isProfileComplete()) {
-        setShowProfilePrompt(true);
+        requestProfilePrompt();
       }
     }} />;
   }
@@ -454,20 +472,28 @@ export default function App() {
         onClose={() => setIsServiceProviderOpen(false)}
       />
 
-      {/* Greeting toast */}
-      {greeting && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[95] bg-cyber-blue text-black px-4 py-2 rounded-xl text-xs font-black flex items-center gap-3 shadow-lg max-w-[90vw]">
-          <span className="truncate">{greeting}</span>
-          <button
-            type="button"
-            onClick={() => setGreeting(null)}
-            aria-label="Dismiss greeting"
-            className="shrink-0 p-1 text-black/60 hover:text-black transition-colors touch-manipulation"
+      {/* Login welcome toast — centred at the top, responsive, auto-dismisses */}
+      <AnimatePresence>
+        {greeting && (
+          <motion.div
+            initial={{ opacity: 0, y: -14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -14 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[95] bg-cyber-blue text-black px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black flex items-center gap-3 shadow-lg max-w-[90vw] w-max"
           >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
+            <span className="truncate">{greeting}</span>
+            <button
+              type="button"
+              onClick={() => setGreeting(null)}
+              aria-label="Dismiss greeting"
+              className="shrink-0 p-1 text-black/60 hover:text-black transition-colors touch-manipulation"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Offline indicator */}
       {!isOnline && (
         <div className="fixed top-4 right-4 z-[95] bg-cyber-red/80 text-white px-3 py-2 rounded-xl text-xs font-bold">

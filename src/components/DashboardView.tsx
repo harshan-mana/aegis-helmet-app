@@ -613,32 +613,85 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   // Webcam controls
   const startWebcam = useCallback(async () => {
     setWebcamError(null);
-    try {
-      // Stop any existing stream first
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode },
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-        setIsWebcamActive(true);
-        setIsTracking(true);
-        setDetectionActive(true);
-      }
-    } catch (err: any) {
-      console.warn('Camera access failed:', err);
-      if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        setWebcamError('No camera device detected on this device.');
-      } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setWebcamError('Camera permission denied. Please allow camera access.');
-      } else {
-        setWebcamError(err.message || 'Camera access failed.');
+    const videoEl = videoRef.current;
+    if (!videoEl) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setWebcamError('Camera is not supported in this browser.');
+      setIsWebcamActive(false);
+      return;
+    }
+
+    // Stop any existing stream first
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    videoEl.srcObject = null;
+
+    // `ideal` (not an exact value) so devices that lack the requested facing
+    // mode still resolve instead of throwing OverconstrainedError, with a
+    // progressively more permissive fallback.
+    const attempts: MediaStreamConstraints[] = [
+      {
+        video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      },
+      { video: { facingMode: { ideal: 'user' } }, audio: false },
+      { video: true, audio: false },
+    ];
+
+    let stream: MediaStream | null = null;
+    let lastErr: any = null;
+    for (const constraints of attempts) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        break;
+      } catch (err: any) {
+        lastErr = err;
+        // A hard permission denial will not be fixed by weaker constraints.
+        if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') break;
       }
     }
+
+    if (!stream) {
+      const name = lastErr?.name;
+      if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') {
+        setWebcamError('No camera device detected on this device.');
+      } else if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+        setWebcamError('Camera permission denied. Please allow camera access in your browser settings.');
+      } else {
+        setWebcamError(lastErr?.message || 'Camera access failed.');
+      }
+      setIsWebcamActive(false);
+      return;
+    }
+
+    // Bind the stream and start playback before reporting the active state.
+    streamRef.current = stream;
+    videoEl.srcObject = stream;
+    videoEl.muted = true;
+    try {
+      await videoEl.play();
+    } catch {
+      // Autoplay can be blocked; muted + playsInline normally recovers it.
+      try {
+        videoEl.muted = true;
+        await videoEl.play();
+      } catch {
+        /* reported below as a permission-style message */
+      }
+    }
+
+    if (videoEl.readyState < 2) {
+      setWebcamError('Camera started but the video stream did not play. Please try again.');
+      setIsWebcamActive(false);
+      return;
+    }
+
+    setWebcamError(null);
+    setIsWebcamActive(true);
+    setIsTracking(true);
+    setDetectionActive(true);
   }, [facingMode]);
 
   // Auto-start camera and detection on component mount (with delay to ensure video element is rendered)
