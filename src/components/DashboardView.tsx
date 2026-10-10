@@ -59,7 +59,13 @@ import {
   type VehicleVerdict,
   type VehicleSubtype,
 } from '../utils/vehicleClassification';
-import { DEFAULT_VERIFICATION_CONFIG, verifyCandidate, VerificationTracker } from '../utils/violationVerification';
+import {
+  DEFAULT_VERIFICATION_CONFIG,
+  verifyCandidate,
+  VerificationTracker,
+  TWO_WHEELER_CLASSES,
+  type Box,
+} from '../utils/violationVerification';
 
 interface EmergencyContact {
   id: string;
@@ -170,6 +176,17 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   const lastPredictionsRef = useRef<cocoSsd.DetectedObject[]>([]);
   const lastClassesRef = useRef<string>('');
   const lastInferRef = useRef(0);
+  // Throttles the automatic-capture candidate check (ms since last frame).
+  const lastAutoCaptureCheckRef = useRef(0);
+  // Latest live values, so the capture path never reads a stale render
+  // (the detection loop intentionally keeps a stable effect closure).
+  const liveCaptureCtxRef = useRef({
+    speedKmh: 0,
+    gpsStatus: 'searching' as 'searching' | 'locked' | 'denied' | 'unavailable',
+    gpsCoords: null as { lat: number; lng: number } | null,
+    detectedObjects: [] as string[],
+  });
+  liveCaptureCtxRef.current = { speedKmh, gpsStatus, gpsCoords, detectedObjects };
 
   // Indian-vehicle classification:
   //  - dedicatedModelRef holds trained weights if they exist at
@@ -208,6 +225,8 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     reasons: string[];
   } | null>(null);
   const captureResultTimerRef = useRef(0);
+  // Guards against overlapping manual + automatic captures writing twice.
+  const autoCaptureInFlightRef = useRef(false);
 
   // Evidence management: view details, edit metadata, human review, delete.
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -286,6 +305,168 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
       setStorageError('Could not update evidence metadata.');
     }
     setEditingEvidence(null);
+  };
+
+  /** Evidence for a detection, shown in the capture toast. */
+  type CaptureCandidate = {
+    status: 'confirmed' | 'unverified' | 'rejected';
+    violationType: string | null;
+    reasons: string[];
+  };
+
+  const showCaptureResult = (result: CaptureCandidate, ms = 6000) => {
+    setCaptureResult(result);
+    if (captureResultTimerRef.current) clearTimeout(captureResultTimerRef.current);
+    captureResultTimerRef.current = setTimeout(() => setCaptureResult(null), ms);
+  };
+
+  /**
+   * Capture the current camera frame and persist it as evidence.
+   *
+   * `mode`:
+   *  - 'manual'  — user pressed Capture; the image is always saved, but the
+   *                violation verdict is still decided by the verification
+   *                pipeline (never assumed).
+   *  - 'auto'    — fired by the detection loop once a candidate is CONFIRMED;
+   *                nothing is saved if the candidate is not confirmed, and the
+   *                de-dup window stops repeated captures of one event.
+   */
+  const captureEvidence = async (mode: 'manual' | 'auto' = 'manual') => {
+    if (autoCaptureInFlightRef.current) return; // never overlap captures
+    if (!videoRef.current || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    autoCaptureInFlightRef.current = true;
+    try {
+      canvas.width = videoRef.current.videoWidth || 640;
+      canvas.height = videoRef.current.videoHeight || 360;
+      ctx.drawImage(videoRef.current, 0, 0);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+      const now = Date.now();
+      const live = liveCaptureCtxRef.current;
+      const top = lastPredictionsRef.current
+        .slice()
+        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0];
+      const rawClass = top?.class || 'manual_capture';
+      const confidence = top?.score ?? 0;
+      const topIndex = top ? lastPredictionsRef.current.indexOf(top) : -1;
+      const verdict = topIndex >= 0 ? lastVerdictsRef.current[topIndex] ?? null : null;
+      const classified = verdict ? verdict.subtype : 'other';
+      const streak = verificationRef.current.streakFor(rawClass);
+      const minConf = DEFAULT_VERIFICATION_CONFIG.minDetectionConfidence;
+
+      // TRIPLE_RIDING context: this two-wheeler's box + every person box.
+      let candidate: CaptureCandidate;
+      if (top && confidence >= minConf) {
+        const personBoxes: Box[] = lastPredictionsRef.current
+          .filter((p) => p.class === 'person')
+          .map((p) => ({ x: p.bbox[0], y: p.bbox[1], width: p.bbox[2], height: p.bbox[3] }));
+        const twoWheelerBox: Box = {
+          x: top.bbox[0],
+          y: top.bbox[1],
+          width: top.bbox[2],
+          height: top.bbox[3],
+        };
+        candidate = verifyCandidate(DEFAULT_VERIFICATION_CONFIG, {
+          detectedClass: rawClass,
+          confidence,
+          speedKmh: live.speedKmh,
+          hasGpsFix: live.gpsStatus === 'locked',
+          isVehicle: isVehicleClass(rawClass),
+          frameStreak: streak,
+          now,
+          tripleRiding: TWO_WHEELER_CLASSES.includes(rawClass)
+            ? { twoWheeler: twoWheelerBox, persons: personBoxes }
+            : null,
+        });
+      } else {
+        candidate = {
+          status: 'unverified',
+          violationType: null,
+          reasons: [
+            top
+              ? `Confidence ${(confidence * 100).toFixed(0)}% below minimum ${(minConf * 100).toFixed(0)}%`
+              : 'No active detection — manual capture',
+            'Saved as UNVERIFIED candidate for human review (not a confirmed violation)',
+          ],
+        };
+      }
+
+      if (verdict) {
+        candidate.reasons = [
+          ...candidate.reasons,
+          `Classification: ${verdict.label} (${verdict.verified ? 'verified by trained model' : 'unverified heuristic'}) — ${verdict.basis}`,
+        ];
+      }
+
+      // Automatic capture only fires for a CONFIRMED violation.
+      if (mode === 'auto' && candidate.status !== 'confirmed') return;
+
+      // De-dup: one record per continuing violation event.
+      if (
+        candidate.violationType &&
+        verificationRef.current.isDuplicate(candidate.violationType, now)
+      ) {
+        if (mode === 'manual') {
+          showCaptureResult({
+            status: 'unverified',
+            violationType: candidate.violationType,
+            reasons: ['Duplicate suppressed — same violation event captured recently'],
+          });
+        }
+        return;
+      }
+
+      if (mode === 'manual') setCapturedImages(prev => [...prev, dataUrl]);
+
+      try {
+        const resp = await fetch(dataUrl);
+        const blob = await resp.blob();
+        const id = `${now}_${Math.floor(Math.random() * 1e6)}`;
+        const record: ViolationRecord = {
+          id,
+          type: candidate.violationType || rawClass,
+          createdAt: now,
+          speed: speedKmh,
+          objects: live.detectedObjects.join(', '),
+          confidence: Math.round(confidence * 100),
+          lat: live.gpsCoords?.lat ?? null,
+          lng: live.gpsCoords?.lng ?? null,
+          blob,
+          verificationStatus: candidate.status === 'confirmed' ? 'confirmed' : 'unverified',
+          reasons: candidate.reasons,
+          vehicleClass: classified,
+        };
+        const ok = await saveViolation(record);
+        if (!ok) {
+          setStorageError('Evidence could not be saved locally.');
+          return;
+        }
+        if (candidate.violationType) {
+          verificationRef.current.markSaved(candidate.violationType, now);
+        }
+        setEvidenceViolations(prev => [
+          { id, url: URL.createObjectURL(blob), label: record.type, record },
+          ...prev,
+        ]);
+        showCaptureResult(
+          {
+            status: candidate.status === 'confirmed' ? 'confirmed' : 'unverified',
+            violationType: candidate.violationType,
+            reasons: candidate.reasons,
+          },
+          mode === 'auto' ? 5000 : 6000
+        );
+      } catch (e) {
+        console.error('Violation save failed:', e);
+        setStorageError('Evidence could not be saved locally.');
+      }
+    } finally {
+      autoCaptureInFlightRef.current = false;
+    }
   };
 
   const confirmDeleteEvidence = async (id: string) => {
@@ -576,6 +757,58 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
               setDetectedObjects(filtered.map((p) => p.class));
             }
             setDetectionConfidence(filtered.length ? Math.round(Math.max(...filtered.map((p) => p.score)) * 100) : 0);
+
+            // --- Automatic evidence capture ---------------------------------
+            // Only fires once a candidate actually passes the verification
+            // rules. Throttled, de-duplicated, and never blocks the loop.
+            if (
+              DEFAULT_VERIFICATION_CONFIG.autoCaptureConfirmed &&
+              filtered.length &&
+              t - lastAutoCaptureCheckRef.current >= 1200
+            ) {
+              lastAutoCaptureCheckRef.current = t;
+              const liveAuto = liveCaptureCtxRef.current;
+              const personBoxes: Box[] = filtered
+                .filter((p) => p.class === 'person')
+                .map((p) => ({ x: p.bbox[0], y: p.bbox[1], width: p.bbox[2], height: p.bbox[3] }));
+              const speed = liveAuto.speedKmh;
+              const locked = liveAuto.gpsStatus === 'locked';
+              for (const p of filtered) {
+                const cls = p.class;
+                const isTwoWheeler = TWO_WHEELER_CLASSES.includes(cls);
+                const isVehicleish = isVehicleClass(cls);
+                // Only rules we can actually evaluate are auto-triggered.
+                const maybeOverspeed =
+                  isVehicleish && locked && speed > DEFAULT_VERIFICATION_CONFIG.overspeedLimitKmh;
+                const maybeTriple = isTwoWheeler && personBoxes.length >= 2;
+                if (!maybeOverspeed && !maybeTriple) continue;
+
+                const verdictCheck = verifyCandidate(DEFAULT_VERIFICATION_CONFIG, {
+                  detectedClass: cls,
+                  confidence: p.score,
+                  speedKmh: speed,
+                  hasGpsFix: locked,
+                  isVehicle: isVehicleish,
+                  frameStreak: verificationRef.current.streakFor(cls),
+                  now: Date.now(),
+                  tripleRiding: isTwoWheeler
+                    ? {
+                        twoWheeler: { x: p.bbox[0], y: p.bbox[1], width: p.bbox[2], height: p.bbox[3] },
+                        persons: personBoxes,
+                      }
+                    : null,
+                });
+                if (
+                  verdictCheck.status === 'confirmed' &&
+                  verdictCheck.violationType &&
+                  !verificationRef.current.isDuplicate(verdictCheck.violationType, Date.now())
+                ) {
+                  // Fire and forget: captureEvidence serialises itself.
+                  void captureEvidence('auto');
+                  break;
+                }
+              }
+            }
           } catch {
             // skip frame
           } finally {
@@ -901,108 +1134,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                     {detectionActive ? 'Stop Detection' : 'YOLOv8 Detect'}
                   </button>
                   <button
-                    onClick={async () => {
-                      if (videoRef.current && canvasRef.current) {
-                        const canvas = canvasRef.current;
-                        const ctx = canvas.getContext('2d');
-                        if (ctx) {
-                          canvas.width = videoRef.current.videoWidth || 640;
-                          canvas.height = videoRef.current.videoHeight || 360;
-                          ctx.drawImage(videoRef.current, 0, 0);
-                          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-                          setCapturedImages(prev => [...prev, dataUrl]);
-                          // Cross-check the detection BEFORE saving any violation.
-                          const now = Date.now();
-                          const top = lastPredictionsRef.current
-                            .slice()
-                            .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0];
-                          const rawClass = top?.class || 'manual_capture';
-                          const confidence = top?.score ?? 0;
-                          // Latest classification verdict for the strongest box.
-                          const topIndex = top ? lastPredictionsRef.current.indexOf(top) : -1;
-                          const verdict = topIndex >= 0 ? lastVerdictsRef.current[topIndex] ?? null : null;
-                          const classified = verdict ? verdict.subtype : 'other';
-                          const streak = verificationRef.current.streakFor(rawClass);
-                          const minConf = DEFAULT_VERIFICATION_CONFIG.minDetectionConfidence;
-                          let candidate;
-                          if (top && confidence >= minConf) {
-                            candidate = verifyCandidate(DEFAULT_VERIFICATION_CONFIG, {
-                              detectedClass: rawClass,
-                              confidence,
-                              speedKmh,
-                              hasGpsFix: gpsStatus === 'locked',
-                              isVehicle: isVehicleClass(rawClass),
-                              frameStreak: streak,
-                              now,
-                            });
-                          } else {
-                            // No qualifying detection — preserve the manual capture
-                            // as an UNVERIFIED candidate (never a confirmed violation).
-                            candidate = {
-                              status: 'unverified' as const,
-                              violationType: null,
-                              reasons: [
-                                top
-                                  ? `Confidence ${(confidence * 100).toFixed(0)}% below minimum ${(minConf * 100).toFixed(0)}%`
-                                  : 'No active detection — manual capture',
-                                'Saved as UNVERIFIED candidate for human review (not a confirmed violation)',
-                              ],
-                            };
-                          }
-                          // Attach the classification basis so the record
-                          // states exactly how the vehicle type was decided.
-                          if (verdict) candidate.reasons = [...candidate.reasons, `Classification: ${verdict.label} (${verdict.verified ? 'verified by trained model' : 'unverified heuristic'}) — ${verdict.basis}`];
-                          // De-dup: suppress a duplicate of the same continuing event.
-                          if (candidate.violationType && verificationRef.current.isDuplicate(candidate.violationType, now)) {
-                            setCaptureResult({
-                              status: 'unverified',
-                              violationType: candidate.violationType,
-                              reasons: ['Duplicate suppressed — same violation event captured recently'],
-                            });
-                            if (captureResultTimerRef.current) clearTimeout(captureResultTimerRef.current);
-                            captureResultTimerRef.current = setTimeout(() => setCaptureResult(null), 6000);
-                            return;
-                          }
-                          // Persist the original image + verified metadata.
-                          try {
-                            const resp = await fetch(dataUrl);
-                            const blob = await resp.blob();
-                            const id = `${now}_${Math.floor(Math.random() * 1e6)}`;
-                            const record: ViolationRecord = {
-                              id,
-                              type: candidate.violationType || rawClass,
-                              createdAt: now,
-                              speed: speedKmh,
-                              objects: detectedObjects.join(', '),
-                              confidence: Math.round(confidence * 100),
-                              lat: gpsCoords?.lat ?? null,
-                              lng: gpsCoords?.lng ?? null,
-                              blob,
-                              verificationStatus: candidate.status === 'confirmed' ? 'confirmed' : 'unverified',
-                              reasons: candidate.reasons,
-                              vehicleClass: classified,
-                            };
-                            const ok = await saveViolation(record);
-                            if (!ok) {
-                              setStorageError('Evidence could not be saved locally.');
-                            } else {
-                              if (candidate.violationType) verificationRef.current.markSaved(candidate.violationType, now);
-                              setEvidenceViolations(prev => [{ id, url: URL.createObjectURL(blob), label: record.type, record }, ...prev]);
-                              setCaptureResult({
-                                status: candidate.status === 'confirmed' ? 'confirmed' : 'unverified',
-                                violationType: candidate.violationType,
-                                reasons: candidate.reasons,
-                              });
-                              if (captureResultTimerRef.current) clearTimeout(captureResultTimerRef.current);
-                              captureResultTimerRef.current = setTimeout(() => setCaptureResult(null), 6000);
-                            }
-                          } catch (e) {
-                            console.error('Violation save failed:', e);
-                            setStorageError('Evidence could not be saved locally.');
-                          }
-                        }
-                      }
-                    }}
+                    onClick={() => captureEvidence('manual')}
                     className="px-4 py-2 bg-cyber-green text-black rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-all touch-manipulation"
                   >
                     <Camera className="w-4 h-4" />

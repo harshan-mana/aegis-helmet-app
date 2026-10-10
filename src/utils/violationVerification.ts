@@ -14,6 +14,12 @@ export interface VerificationConfig {
   overspeedLimitKmh: number;
   /** Minimum time (ms) between saving the same violation type (de-dup). */
   dedupWindowMs: number;
+  /** Distinct people required on one two-wheeler for TRIPLE_RIDING. */
+  tripleRidingMinPeople: number;
+  /** Fraction of a person box that must sit over the two-wheeler to count. */
+  personAssocOverlap: number;
+  /** Automatically capture evidence once a candidate is CONFIRMED. */
+  autoCaptureConfirmed: boolean;
 }
 
 export const DEFAULT_VERIFICATION_CONFIG: VerificationConfig = {
@@ -21,7 +27,134 @@ export const DEFAULT_VERIFICATION_CONFIG: VerificationConfig = {
   temporalConsistencyFrames: 3,
   overspeedLimitKmh: 60,
   dedupWindowMs: 5000,
+  tripleRidingMinPeople: 3,
+  personAssocOverlap: 0.35,
+  autoCaptureConfirmed: true,
 };
+
+// ---------------------------------------------------------------------------
+// Geometry helpers (shared by the triple-riding rule)
+// ---------------------------------------------------------------------------
+export type Box = { x: number; y: number; width: number; height: number };
+
+export function iou(a: Box, b: Box): number {
+  const ax2 = a.x + a.width;
+  const ay2 = a.y + a.height;
+  const bx2 = b.x + b.width;
+  const by2 = b.y + b.height;
+  const ix1 = Math.max(a.x, b.x);
+  const iy1 = Math.max(a.y, b.y);
+  const ix2 = Math.min(ax2, bx2);
+  const iy2 = Math.min(ay2, by2);
+  const iw = ix2 - ix1;
+  const ih = iy2 - iy1;
+  if (iw <= 0 || ih <= 0) return 0;
+  const inter = iw * ih;
+  const areaA = a.width * a.height;
+  const areaB = b.width * b.height;
+  if (areaA <= 0 || areaB <= 0) return 0;
+  return inter / (areaA + areaB - inter);
+}
+
+/**
+ * Fraction of `inner` (a person box) that overlaps `outer` (a two-wheeler box).
+ * Used to decide whether a person is plausibly RIDING that two-wheeler rather
+ * than merely standing next to it.
+ */
+export function overlapRatio(inner: Box, outer: Box): number {
+  const areaInner = inner.width * inner.height;
+  if (areaInner <= 0) return 0;
+  const ix1 = Math.max(inner.x, outer.x);
+  const iy1 = Math.max(inner.y, outer.y);
+  const ix2 = Math.min(inner.x + inner.width, outer.x + outer.width);
+  const iy2 = Math.min(inner.y + inner.height, outer.y + outer.height);
+  const iw = ix2 - ix1;
+  const ih = iy2 - iy1;
+  if (iw <= 0 || ih <= 0) return 0;
+  return (iw * ih) / areaInner;
+}
+
+/** Collapse duplicate detections of the same object (IoU NMS). */
+export function dedupeByIoU(boxes: Box[], iouThreshold = 0.5): Box[] {
+  const kept: Box[] = [];
+  for (const b of boxes) {
+    if (!kept.some((k) => iou(k, b) > iouThreshold)) kept.push(b);
+  }
+  return kept;
+}
+
+/** COCO classes that are two-wheelers (the plausible TRIPLE_RIDING host). */
+export const TWO_WHEELER_CLASSES = ['motorcycle', 'bicycle', 'scooter'];
+
+export interface TripleRidingInput {
+  /** Box of the detected two-wheeler, in video pixels. */
+  twoWheeler: Box;
+  /** Boxes of every detected person, in video pixels. */
+  persons: Box[];
+  /** Two-wheeler frame streak (temporal consistency). */
+  frameStreak: number;
+}
+
+export interface TripleRidingResult {
+  /** Distinct persons plausibly associated with this two-wheeler. */
+  associatedPeople: number;
+  confirmed: boolean;
+  reasons: string[];
+}
+
+/**
+ * TRIPLE_RIDING cross-check.
+ *
+ * Counts DISTINCT people (duplicate person boxes are collapsed first, so one
+ * person detected twice is never counted twice) whose box sits over the
+ * two-wheeler. Confirmation additionally requires temporal consistency.
+ *
+ * Honest limitation: association is geometric, not identity tracking — it
+ * cannot prove which person is on which vehicle when two-wheels overlap in
+ * frame, so borderline cases stay UNVERIFIED.
+ */
+export function evaluateTripleRiding(
+  cfg: VerificationConfig,
+  input: TripleRidingInput
+): TripleRidingResult {
+  const distinctPersons = dedupeByIoU(input.persons, 0.5);
+  const associated = distinctPersons.filter(
+    (p) => overlapRatio(p, input.twoWheeler) >= cfg.personAssocOverlap
+  );
+  const count = associated.length;
+
+  if (count < cfg.tripleRidingMinPeople) {
+    return {
+      associatedPeople: count,
+      confirmed: false,
+      reasons: [
+        `${count} of ${cfg.tripleRidingMinPeople} required people associated with the two-wheeler`,
+      ],
+    };
+  }
+
+  if (input.frameStreak < cfg.temporalConsistencyFrames) {
+    return {
+      associatedPeople: count,
+      confirmed: false,
+      reasons: [
+        `${count} people associated, but only ${input.frameStreak}/${cfg.temporalConsistencyFrames} frames`,
+        'Needs temporal consistency across frames',
+      ],
+    };
+  }
+
+  return {
+    associatedPeople: count,
+    confirmed: true,
+    reasons: [
+      `${count} distinct people associated with one two-wheeler (>= ${cfg.tripleRidingMinPeople})`,
+      `Duplicate person boxes removed before counting (${input.persons.length} raw -> ${distinctPersons.length} distinct)`,
+      `Consistent across ${input.frameStreak} frames`,
+      'Geometric association only — not identity tracking',
+    ],
+  };
+}
 
 export type VerificationStatus = 'confirmed' | 'unverified' | 'rejected';
 
@@ -41,15 +174,26 @@ export interface CandidateInput {
   /** consecutive frames this class has been detected */
   frameStreak: number;
   now: number; // epoch ms
+  /**
+   * Optional TRIPLE_RIDING context: this detection's box plus every detected
+   * person box in the same frame (video pixels).
+   */
+  tripleRiding?: { twoWheeler: Box; persons: Box[] } | null;
 }
 
 /**
  * Evaluate one detection against the configured rules.
- * Honest by design:
- *  - OVER_SPEEDING: only when a trustworthy GPS speed exceeds the limit AND a
- *    vehicle is in frame. Speed comes from GPS, never from a single frame.
- *  - TRIPLE_RIDING / NO_HELMET / FAKE_PLATE / ACCIDENT: COCO-SSD cannot prove
- *    these -> always UNVERIFIED (human review), never falsely confirmed.
+ *
+ * Rules that ARE supportable with the data this app actually has:
+ *  - OVER_SPEEDING: trustworthy GPS speed over the limit AND a vehicle in
+ *    frame. Speed is never inferred from a single camera frame.
+ *  - TRIPLE_RIDING: 3+ DISTINCT people (duplicates removed) associated with
+ *    one two-wheeler, seen consistently across frames.
+ *
+ * Rules that are NOT supportable and must never be auto-confirmed:
+ *  - NO_HELMET (needs a helmet-capable model), FAKE_PLATE (needs a plate/OCR
+ *    or an authorised database service), ACCIDENT (needs an accident model).
+ *  These stay UNVERIFIED / require human review.
  */
 export function verifyCandidate(
   cfg: VerificationConfig,
@@ -72,7 +216,7 @@ export function verifyCandidate(
     );
   }
 
-  // OVER_SPEEDING is the only rule supportable with the available data.
+  // --- OVER_SPEEDING: device GPS speed, never inferred from a frame --------
   if (input.isVehicle && input.hasGpsFix && input.speedKmh > cfg.overspeedLimitKmh) {
     if (input.frameStreak >= cfg.temporalConsistencyFrames) {
       return {
@@ -89,7 +233,34 @@ export function verifyCandidate(
     return { status: 'unverified', violationType: 'OVER_SPEEDING', reasons };
   }
 
-  // Rules the current model/sensors cannot prove — require human review.
+  // --- TRIPLE_RIDING: distinct people on one two-wheeler ------------------
+  if (input.tripleRiding) {
+    const tr = evaluateTripleRiding(cfg, {
+      twoWheeler: input.tripleRiding.twoWheeler,
+      persons: input.tripleRiding.persons,
+      frameStreak: input.frameStreak,
+    });
+    if (tr.confirmed) {
+      return {
+        status: 'confirmed',
+        violationType: 'TRIPLE_RIDING',
+        reasons: tr.reasons,
+      };
+    }
+    if (tr.associatedPeople >= 2) {
+      // Close, but not provable — surface it as a candidate for review.
+      return {
+        status: 'unverified',
+        violationType: 'TRIPLE_RIDING',
+        reasons: [
+          ...tr.reasons,
+          'Marked UNVERIFIED — association is geometric and could be ambiguous',
+        ],
+      };
+    }
+  }
+
+  // Everything else: no rule is provable with the current model + sensors.
   return {
     status: 'unverified',
     violationType: null,
@@ -98,7 +269,7 @@ export function verifyCandidate(
       ...reasons,
       'No provable violation rule satisfied with the available model/sensors',
       'Marked UNVERIFIED — requires human review',
-      'Not provable without a dedicated model: TRIPLE_RIDING, NO_HELMET, FAKE_PLATE, ACCIDENT',
+      'Not provable without a dedicated model: NO_HELMET, FAKE_PLATE, ACCIDENT',
     ],
   };
 }
