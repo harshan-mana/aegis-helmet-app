@@ -213,6 +213,10 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   }, []);
 
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
+  // Mirrors facingMode so startWebcam (a stable callback) can read the latest
+  // value without re-creating itself.
+  const facingModeRef = useRef<'user' | 'environment'>('environment');
+  facingModeRef.current = facingMode;
 
   // Violation verification (cross-checking pipeline).
   // Single source of truth for candidate evaluation + temporal
@@ -610,8 +614,11 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     return () => clearInterval(interval);
   }, [isTracking, isWebcamActive, gpsCoords, speedKmh]);
 
-  // Webcam controls
-  const startWebcam = useCallback(async () => {
+  // Webcam controls.
+  // `mode` is passed explicitly so a front/rear switch never uses a stale
+  // closure value; it defaults to the currently selected facing mode.
+  const startWebcam = useCallback(async (mode?: 'user' | 'environment') => {
+    const want = mode ?? facingModeRef.current;
     setWebcamError(null);
     const videoEl = videoRef.current;
     if (!videoEl) return;
@@ -633,10 +640,10 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     // progressively more permissive fallback.
     const attempts: MediaStreamConstraints[] = [
       {
-        video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { facingMode: { ideal: want }, width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
       },
-      { video: { facingMode: { ideal: 'user' } }, audio: false },
+      { video: { facingMode: { ideal: want } }, audio: false },
       { video: true, audio: false },
     ];
 
@@ -683,6 +690,24 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     }
 
     if (videoEl.readyState < 2) {
+      // Switching cameras briefly leaves readyState at 0. Give the new stream
+      // a moment to deliver frames before deciding it failed.
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const done = () => {
+          if (settled) return;
+          settled = true;
+          videoEl.removeEventListener('loadeddata', done);
+          videoEl.removeEventListener('canplay', done);
+          resolve();
+        };
+        videoEl.addEventListener('loadeddata', done);
+        videoEl.addEventListener('canplay', done);
+        setTimeout(done, 2000);
+      });
+    }
+
+    if (videoEl.readyState < 2) {
       setWebcamError('Camera started but the video stream did not play. Please try again.');
       setIsWebcamActive(false);
       return;
@@ -692,15 +717,18 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     setIsWebcamActive(true);
     setIsTracking(true);
     setDetectionActive(true);
-  }, [facingMode]);
+  }, []);
 
-  // Auto-start camera and detection on component mount (with delay to ensure video element is rendered)
+  // Auto-start the camera once on mount only. The dependency list is
+  // intentionally empty: this must never re-run and fight the front/rear
+  // toggle with a second competing restart.
   useEffect(() => {
     const timer = setTimeout(() => {
       startWebcam();
     }, 500);
     return () => clearTimeout(timer);
-  }, [startWebcam]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const stopWebcam = useCallback(() => {
     if (streamRef.current) {
@@ -1152,7 +1180,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
             <div className="absolute top-4 right-4 z-40 flex flex-wrap items-center justify-end gap-2 max-w-[calc(100%-2rem)] sm:max-w-none">
               {!isWebcamActive ? (
                 <button
-                  onClick={startWebcam}
+                  onClick={() => startWebcam()}
                   className="px-4 py-2 bg-cyber-blue text-black rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-all shadow-[0_0_20px_#FF6B35] touch-manipulation"
                 >
                   <Camera className="w-4 h-4" />
@@ -1163,11 +1191,12 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                   {/* Front/Rear camera toggle */}
                   <button
                     onClick={() => {
-                      const newFacing = facingMode === 'user' ? 'environment' : 'user';
+                      const newFacing = facingModeRef.current === 'user' ? 'environment' : 'user';
                       setFacingMode(newFacing);
-                      // Restart camera with new facing mode
-                      stopWebcam();
-                      setTimeout(() => startWebcam(), 100);
+                      // startWebcam stops the current stream itself and takes
+                      // the new facing mode directly, so there is no stale
+                      // closure and no competing timed restart.
+                      startWebcam(newFacing);
                     }}
                     className="px-3 py-2 bg-black/60 backdrop-blur-md border border-white/15 hover:bg-black/80 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all touch-manipulation"
                     title={facingMode === 'user' ? 'Switch to Rear Camera' : 'Switch to Front Camera'}
