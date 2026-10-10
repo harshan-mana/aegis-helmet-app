@@ -496,9 +496,11 @@ export default function ViolationsView() {
                   <select
                     value={profileDraft.bloodGroup}
                     onChange={(e) => setProfileDraft({ ...profileDraft, bloodGroup: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyber-blue"
+                    className={`w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-cyber-blue transition-colors ${
+                      profileDraft.bloodGroup ? 'text-white font-bold' : 'text-white/40 font-normal'
+                    }`}
                   >
-                    <option value="" className="bg-black text-white/50">Enter your blood group</option>
+                    <option value="" className="bg-black text-white/40" disabled>Enter your blood group</option>
                     {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((bg) => (
                       <option key={bg} value={bg} className="bg-black text-white">{bg}</option>
                     ))}

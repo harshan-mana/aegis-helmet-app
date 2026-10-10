@@ -51,7 +51,17 @@ export default function App() {
   const [currentView, setCurrentView] = useState<'dashboard' | 'violations' | 'authority' | 'profile' | 'settings'>('dashboard');
   const [loading, setLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
-  const [showLanding, setShowLanding] = useState(true);
+  // Skip the landing page when a session already exists, so a page refresh or
+  // browser restart keeps the user signed in. The landing page only shows for
+  // genuinely new (signed-out) visitors.
+  const [showLanding, setShowLanding] = useState<boolean>(() => {
+    if (auth.currentUser) return false;
+    try {
+      return !localStorage.getItem(LOCAL_AUTH_STORAGE_KEY);
+    } catch {
+      return true;
+    }
+  });
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isServiceProviderOpen, setIsServiceProviderOpen] = useState(false);
   const [showProfilePrompt, setShowProfilePrompt] = useState(false);
@@ -115,9 +125,9 @@ export default function App() {
     return false;
   };
 
-  // The "Complete Your Profile" prompt shows only ONCE per user. Once it is
-  // dismissed (Skip, Save, or the X button) the flag is persisted per account
-  // so it never re-appears on refresh or navigation.
+  // The "Complete Your Profile" prompt shows only ONCE per user, only right
+  // after an explicit sign-in (never on refresh/session restore), and it
+  // auto-dismisses after 4s. Dismissing persists the flag per account.
   const profilePromptKey = (uid: string) => `aegis_profile_prompt_dismissed_${uid}`;
   const currentProfileUid = () => effectiveUser?.uid || effectiveUser?.email || 'anon';
   const hasSeenProfilePrompt = (uid: string) => {
@@ -131,6 +141,16 @@ export default function App() {
     if (hasSeenProfilePrompt(currentProfileUid())) return;
     setShowProfilePrompt(true);
   };
+
+  // The profile prompt auto-dismisses after 4 seconds so it never lingers.
+  useEffect(() => {
+    if (!showProfilePrompt) return;
+    const t = setTimeout(() => {
+      markProfilePromptSeen(currentProfileUid());
+      setShowProfilePrompt(false);
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [showProfilePrompt]);
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
@@ -159,9 +179,10 @@ export default function App() {
           if (snapshot.exists()) {
             const data = snapshot.data();
             setUserRole(data.role || 'Driver');
-            if (!data.phone || !data.emergencyContact1?.phone) {
-              requestProfilePrompt();
-            }
+            // NOTE: intentionally no profile prompt here. This listener also
+            // runs on session restore, so prompting from it would make the
+            // modal reappear on every refresh. It is shown only after an
+            // explicit sign-in (see handleAuthSuccess / handleGuestLogin).
           } else {
             handleNewUser(u.uid, u.email || '');
           }
@@ -176,9 +197,7 @@ export default function App() {
           setShowProfilePrompt(false);
         } else {
           setUserRole(localUser.role || 'Driver');
-          if (!isProfileComplete()) {
-            requestProfilePrompt();
-          }
+          // Restored session — do not prompt; only explicit sign-ins prompt.
         }
         setLoading(false);
       }
@@ -195,6 +214,11 @@ export default function App() {
     setUserRole(authUser.role || 'Driver');
     setCurrentView('dashboard');
     setIsAuthModalOpen(false);
+    // The profile prompt only ever appears as a direct result of an explicit
+    // sign-in — never on page refresh or session restore.
+    if (!isProfileComplete()) {
+      requestProfilePrompt();
+    }
   };
 
   const handleGuestLogin = () => {
@@ -356,7 +380,7 @@ export default function App() {
       setLocalUser(user);
       setUserRole(user.role || 'Driver');
       setShowLanding(false);
-      // Check if profile is complete
+      // Check if profile is complete — only ever prompted right after a login.
       if (!isProfileComplete()) {
         requestProfilePrompt();
       }
@@ -565,9 +589,6 @@ export default function App() {
                     </button>
                   </div>
                 </div>
-                <button onClick={skipProfile} className="p-1 text-white/30 hover:text-white shrink-0">
-                  <X className="w-4 h-4" />
-                </button>
               </div>
             </div>
           </motion.div>

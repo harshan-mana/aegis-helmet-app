@@ -423,7 +423,7 @@ export default function SettingsView() {
                         onChange={(e) =>
                           handleTextChange(e.target.value.replace(/\D/g, '').slice(0, 10), 'phone')
                         }
-                        placeholder="Enter 10-digit mobile number"
+                        placeholder="Enter Mobile Number"
                         className={`w-full bg-white/5 border p-4 rounded-xl text-sm font-bold text-white focus:outline-none focus:border-cyber-blue transition-all ${
                           errors.phone ? 'border-cyber-red' : 'border-white/10'
                         }`}
@@ -450,9 +450,13 @@ export default function SettingsView() {
                       <select
                         value={profile?.bloodGroup || ''}
                         onChange={(e) => handleTextChange(e.target.value, 'bloodGroup')}
-                        className="w-full bg-white/5 border border-white/10 p-4 rounded-xl text-sm font-bold text-white focus:outline-none focus:border-cyber-blue"
+                        className={`w-full bg-white/5 border border-white/10 p-4 rounded-xl text-sm focus:outline-none focus:border-cyber-blue transition-colors ${
+                          profile?.bloodGroup
+                            ? 'font-bold text-white'
+                            : 'font-normal text-white/40'
+                        }`}
                       >
-                        <option value="" className="bg-black text-white/50">
+                        <option value="" className="bg-black text-white/40" disabled>
                           Enter your blood group
                         </option>
                         {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((bg) => (

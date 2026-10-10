@@ -1165,7 +1165,7 @@ export default function AuthorityView() {
                       inputMode="numeric"
                       pattern="[0-9]*"
                       maxLength={10}
-                      placeholder="Enter 10-digit mobile number"
+                      placeholder="Enter Mobile Number"
                       value={vehicleForm.ownerPhone}
                       onChange={(e) =>
                         setVehicleForm({
