@@ -4,7 +4,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { SESSION_MAX_AGE_MS } from './lib/firebase';
 import { doc, getDoc, setDoc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, ShieldAlert, User, Phone, Save, X, Zap, Settings, LogOut, ChevronDown, Palette, Moon, Sun, Sparkles } from 'lucide-react';
+import { Shield, ShieldAlert, User, Phone, Save, Zap, Settings, LogOut, ChevronDown, Palette, Moon, Sun, Sparkles } from 'lucide-react';
 import AegisNavbar from './components/AegisNavbar';
 import AuthorityView from './components/AuthorityView';
 import SettingsView from './components/SettingsView';
@@ -84,9 +84,12 @@ export default function App() {
 
   const effectiveUser = user || localUser;
 
-  // Splash screen timer
+  // Splash screen timer.
+  // Held until the full entrance sequence finishes (progress bar starts at
+  // 0.8s and runs 1.2s) so the sign-in screen never appears on top of a
+  // splash that is still animating.
   useEffect(() => {
-    const timer = setTimeout(() => setShowSplash(false), 600);
+    const timer = setTimeout(() => setShowSplash(false), 2100);
     return () => clearTimeout(timer);
   }, []);
 
@@ -101,6 +104,8 @@ export default function App() {
   const greetedUidRef = useRef<string | null>(null);
   useEffect(() => {
     if (!effectiveUser) { greetedUidRef.current = null; return; }
+    // The welcome toast belongs to the app only — never on the landing page.
+    if (showLanding) return;
     const uid = effectiveUser.uid || effectiveUser.email || 'anon';
     // Only greet once per login session for this account.
     if (greetedUidRef.current === uid) return;
@@ -114,7 +119,7 @@ export default function App() {
     setGreeting(already ? 'Welcome back to the Aegis application' : 'Hello Welcome to the Aegis application');
     const t = setTimeout(() => setGreeting(null), 3500);
     return () => clearTimeout(t);
-  }, [effectiveUser]);
+  }, [effectiveUser, showLanding]);
 
   const isProfileComplete = () => {
     const saved = localStorage.getItem('aegis_user_profile');
@@ -322,10 +327,11 @@ export default function App() {
 
   const theme = THEMES.find(t => t.id === currentTheme) || THEMES[0];
 
-  // Splash Screen
+  // Splash Screen — fully opaque so nothing (e.g. the sign-in screen) shows
+  // through it while it animates.
   if (showSplash) {
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center bg-[#0a0a0f] relative overflow-hidden">
+      <div className="fixed inset-0 z-[500] h-screen w-screen flex flex-col items-center justify-center bg-[#0a0a0f] relative overflow-hidden">
         <div className="absolute inset-0 cyber-grid opacity-30" />
         <motion.div
           initial={{ opacity: 0, scale: 0.5 }}
@@ -504,17 +510,9 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -14 }}
             transition={{ duration: 0.25, ease: 'easeOut' }}
-            className="fixed top-4 left-1/2 -translate-x-1/2 z-[95] bg-cyber-blue text-black px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black flex items-center gap-3 shadow-lg max-w-[90vw] w-max"
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[95] bg-cyber-blue text-black px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black shadow-lg max-w-[90vw] w-max text-center"
           >
-            <span className="truncate">{greeting}</span>
-            <button
-              type="button"
-              onClick={() => setGreeting(null)}
-              aria-label="Dismiss greeting"
-              className="shrink-0 p-1 text-black/60 hover:text-black transition-colors touch-manipulation"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
+            <span>{greeting}</span>
           </motion.div>
         )}
       </AnimatePresence>
@@ -534,7 +532,7 @@ export default function App() {
             exit={{ opacity: 0, y: 50 }}
             className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] w-[95%] max-w-md"
           >
-            <div className="glass-panel p-5 border-white/10 shadow-2xl">
+            <div className="p-5 rounded-3xl border border-white/10 shadow-2xl bg-[#141014]">
               <div className="flex items-start gap-3">
                 <div className="p-2 bg-cyber-blue/10 rounded-xl shrink-0">
                   <User className="w-5 h-5 text-cyber-blue" />
