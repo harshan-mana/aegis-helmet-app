@@ -213,9 +213,21 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   }, []);
 
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
-  // Mirrors facingMode so startWebcam (a stable callback) can read the latest
-  // value without re-creating itself.
+  // Desired camera (single source of truth). The UI and the acquisition logic
+  // both read from here, so they can never disagree.
   const facingModeRef = useRef<'user' | 'environment'>('environment');
+  // Mutex: only one camera operation runs at a time.
+  const switchBusyRef = useRef(false);
+  // A click that arrived while a switch was in flight.
+  const switchPendingRef = useRef(false);
+  // Generation token: a slow response from an older request is discarded
+  // instead of overwriting a newer selection.
+  const cameraGenRef = useRef(0);
+  // Last camera that actually produced frames, used to restore on failure.
+  const lastGoodRef = useRef<{ facing: 'user' | 'environment'; deviceId: string | null } | null>(null);
+  // Read by the detection loop so it pauses while the source is switching.
+  const cameraSwitchingRef = useRef(false);
+  const [switchingCamera, setSwitchingCamera] = useState(false);
   facingModeRef.current = facingMode;
 
   // Violation verification (cross-checking pipeline).
@@ -614,38 +626,89 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     return () => clearInterval(interval);
   }, [isTracking, isWebcamActive, gpsCoords, speedKmh]);
 
-  // Webcam controls.
-  // `mode` is passed explicitly so a front/rear switch never uses a stale
-  // closure value; it defaults to the currently selected facing mode.
-  const startWebcam = useCallback(async (mode?: 'user' | 'environment') => {
-    const want = mode ?? facingModeRef.current;
-    setWebcamError(null);
+  // ---------------------------------------------------------------------------
+// Camera acquisition / front-rear switching
+// ---------------------------------------------------------------------------
+
+  /** Pick the concrete videoinput deviceId for a facing mode.
+   *  `facingMode` alone is unreliable on Android Chrome (an `ideal` hint is
+   *  often ignored and the front camera is returned), so we resolve a real
+   *  deviceId from enumerateDevices() and request that device exactly.
+   *  Labels are only populated once camera permission has been granted.
+   */
+  const pickDeviceId = async (desired: 'user' | 'environment'): Promise<string | null> => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter((d) => d.kind === 'videoinput');
+      if (!cams.length) return null;
+      const rearRe = /back|rear|environment|world/i;
+      const frontRe = /front|user|face|selfie/i;
+      const wantRear = desired === 'environment';
+      let match = cams.find((d) => (wantRear ? rearRe : frontRe).test(d.label || ''));
+      // Fall back to ordering when labels are empty/unhelpful: on phones the
+      // front camera is usually listed first.
+      if (!match && cams.length > 1) match = wantRear ? cams[cams.length - 1] : cams[0];
+      return match?.deviceId ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  /** True once the element is actually receiving frames from the new source. */
+  const waitForVideoFrames = (el: HTMLVideoElement, timeoutMs = 3000): Promise<boolean> =>
+    new Promise((resolve) => {
+      if (el.readyState >= 2 && el.videoWidth > 0) return resolve(true);
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        el.removeEventListener('loadeddata', onReady);
+        el.removeEventListener('canplay', onReady);
+        el.removeEventListener('resize', onReady);
+        clearTimeout(timer);
+        resolve(ok);
+      };
+      const onReady = () => {
+        if (el.readyState >= 2 && el.videoWidth > 0) finish(true);
+      };
+      el.addEventListener('loadeddata', onReady);
+      el.addEventListener('canplay', onReady);
+      el.addEventListener('resize', onReady);
+      const timer = setTimeout(() => finish(el.readyState >= 2 && el.videoWidth > 0), timeoutMs);
+    });
+
+  /** Acquire the requested camera and only report success once frames flow. */
+  const performCameraAcquire = async (desired: 'user' | 'environment'): Promise<boolean> => {
     const videoEl = videoRef.current;
-    if (!videoEl) return;
+    if (!videoEl) return false;
     if (!navigator.mediaDevices?.getUserMedia) {
       setWebcamError('Camera is not supported in this browser.');
       setIsWebcamActive(false);
-      return;
+      return false;
     }
 
-    // Stop any existing stream first
+    const gen = ++cameraGenRef.current;
+    cameraSwitchingRef.current = true;
+    setSwitchingCamera(true);
+
+    // Release the previous stream (browsers usually allow only one camera).
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
     videoEl.srcObject = null;
 
-    // `ideal` (not an exact value) so devices that lack the requested facing
-    // mode still resolve instead of throwing OverconstrainedError, with a
-    // progressively more permissive fallback.
-    const attempts: MediaStreamConstraints[] = [
-      {
-        video: { facingMode: { ideal: want }, width: { ideal: 1280 }, height: { ideal: 720 } },
+    const deviceId = await pickDeviceId(desired);
+    const attempts: MediaStreamConstraints[] = [];
+    if (deviceId) {
+      attempts.push({
+        video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
-      },
-      { video: { facingMode: { ideal: want } }, audio: false },
-      { video: true, audio: false },
-    ];
+      });
+    }
+    attempts.push({ video: { facingMode: { exact: desired }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    attempts.push({ video: { facingMode: { ideal: desired } }, audio: false });
+    attempts.push({ video: true, audio: false });
 
     let stream: MediaStream | null = null;
     let lastErr: any = null;
@@ -655,68 +718,123 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
         break;
       } catch (err: any) {
         lastErr = err;
-        // A hard permission denial will not be fixed by weaker constraints.
         if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') break;
       }
     }
 
+    // A newer request superseded us — drop this result instead of applying it.
+    if (gen !== cameraGenRef.current) {
+      stream?.getTracks().forEach((t) => t.stop());
+      return false;
+    }
+
     if (!stream) {
       const name = lastErr?.name;
-      if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') {
-        setWebcamError('No camera device detected on this device.');
-      } else if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
         setWebcamError('Camera permission denied. Please allow camera access in your browser settings.');
+      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+        setWebcamError('No camera device detected on this device.');
       } else {
         setWebcamError(lastErr?.message || 'Camera access failed.');
       }
       setIsWebcamActive(false);
-      return;
+      cameraSwitchingRef.current = false;
+      setSwitchingCamera(false);
+      return false;
     }
 
-    // Bind the stream and start playback before reporting the active state.
     streamRef.current = stream;
     videoEl.srcObject = stream;
     videoEl.muted = true;
     try {
       await videoEl.play();
     } catch {
-      // Autoplay can be blocked; muted + playsInline normally recovers it.
+      videoEl.muted = true;
       try {
-        videoEl.muted = true;
         await videoEl.play();
       } catch {
-        /* reported below as a permission-style message */
+        /* verified below via frame delivery */
       }
     }
 
-    if (videoEl.readyState < 2) {
-      // Switching cameras briefly leaves readyState at 0. Give the new stream
-      // a moment to deliver frames before deciding it failed.
-      await new Promise<void>((resolve) => {
-        let settled = false;
-        const done = () => {
-          if (settled) return;
-          settled = true;
-          videoEl.removeEventListener('loadeddata', done);
-          videoEl.removeEventListener('canplay', done);
-          resolve();
-        };
-        videoEl.addEventListener('loadeddata', done);
-        videoEl.addEventListener('canplay', done);
-        setTimeout(done, 2000);
-      });
+    const gotFrames = await waitForVideoFrames(videoEl);
+
+    if (gen !== cameraGenRef.current) {
+      stream.getTracks().forEach((t) => t.stop());
+      return false;
     }
 
-    if (videoEl.readyState < 2) {
-      setWebcamError('Camera started but the video stream did not play. Please try again.');
+    if (!gotFrames) {
+      // The new source never produced frames — do NOT claim it is active.
+      stream.getTracks().forEach((t) => t.stop());
+      if (streamRef.current === stream) streamRef.current = null;
+      videoEl.srcObject = null;
       setIsWebcamActive(false);
-      return;
+      return false;
     }
+
+    const track = stream.getVideoTracks()[0];
+    const settings = track?.getSettings?.() ?? {};
+    lastGoodRef.current = {
+      facing: desired,
+      deviceId: settings.deviceId ?? deviceId ?? null,
+    };
 
     setWebcamError(null);
+    setFacingMode(desired);
     setIsWebcamActive(true);
     setIsTracking(true);
     setDetectionActive(true);
+    cameraSwitchingRef.current = false;
+    setSwitchingCamera(false);
+    return true;
+  };
+
+  /**
+   * Public entry point used by Start Camera and the front/rear button.
+   * Exactly one click == exactly one switch. Rapid clicks coalesce instead of
+   * corrupting the stream, and a failed switch restores the last good camera.
+   */
+  const startWebcam = useCallback(async (mode?: 'user' | 'environment') => {
+    if (mode) facingModeRef.current = mode;
+    // Reflect the user's intent immediately in the button.
+    setFacingMode(facingModeRef.current);
+
+    if (switchBusyRef.current) {
+      switchPendingRef.current = true;
+      return;
+    }
+    switchBusyRef.current = true;
+    try {
+      let guard = 0;
+      do {
+        switchPendingRef.current = false;
+        const desired = facingModeRef.current;
+        const ok = await performCameraAcquire(desired);
+        // If the requested camera could not be opened, restore the last
+        // working one so the user is never left with no feed.
+        if (!ok) {
+          const good = lastGoodRef.current;
+          if (good && good.facing !== desired && guard < 2) {
+            facingModeRef.current = good.facing;
+            setFacingMode(good.facing);
+            guard++;
+            continue;
+          }
+          setWebcamError(
+            desired === 'environment'
+              ? 'Rear camera is not available on this device.'
+              : 'Front camera could not be opened.'
+          );
+        }
+        guard++;
+      } while (switchPendingRef.current && guard < 4);
+    } finally {
+      switchBusyRef.current = false;
+      switchPendingRef.current = false;
+      cameraSwitchingRef.current = false;
+      setSwitchingCamera(false);
+    }
   }, []);
 
   // Auto-start the camera once on mount only. The dependency list is
@@ -730,6 +848,16 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Clean up the camera and invalidate any pending switch on unmount.
+  useEffect(() => {
+    return () => {
+      cameraGenRef.current++; // invalidate in-flight responses
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      if (videoRef.current) videoRef.current.srcObject = null;
+    };
+  }, []);
+
   const stopWebcam = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -738,6 +866,11 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    // Cancel any in-flight switch so a late response cannot resurrect the feed.
+    cameraGenRef.current++;
+    cameraSwitchingRef.current = false;
+    switchPendingRef.current = false;
+    setSwitchingCamera(false);
     setIsWebcamActive(false);
     setDetectionActive(false);
     setDetectedObjects([]);
@@ -783,6 +916,9 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     const loop = async (t: number) => {
       if (!active) return;
       rafRef.current = requestAnimationFrame(loop);
+      // Pause inference while the camera source is being replaced, so boxes
+      // are never computed against the outgoing feed.
+      if (cameraSwitchingRef.current) return;
       const v = videoRef.current;
       const c = detectCanvasRef.current;
       if (!v || !c || !modelRef.current) return;
@@ -1188,21 +1324,36 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                 </button>
               ) : (
                 <>
-                  {/* Front/Rear camera toggle */}
+                  {/* Front/Rear camera toggle — one click, one switch. A single
+                      onClick (no extra touch handlers) so a tap never
+                      switches twice. */}
                   <button
                     onClick={() => {
                       const newFacing = facingModeRef.current === 'user' ? 'environment' : 'user';
-                      setFacingMode(newFacing);
-                      // startWebcam stops the current stream itself and takes
-                      // the new facing mode directly, so there is no stale
-                      // closure and no competing timed restart.
                       startWebcam(newFacing);
                     }}
-                    className="px-3 py-2 bg-black/60 backdrop-blur-md border border-white/15 hover:bg-black/80 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all touch-manipulation"
-                    title={facingMode === 'user' ? 'Switch to Rear Camera' : 'Switch to Front Camera'}
+                    disabled={switchingCamera}
+                    aria-busy={switchingCamera}
+                    className="px-3 py-2 bg-black/60 backdrop-blur-md border border-white/15 hover:bg-black/80 disabled:opacity-60 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all touch-manipulation"
+                    title={
+                      switchingCamera
+                        ? 'Switching camera...'
+                        : facingMode === 'user'
+                        ? 'Switch to Rear Camera'
+                        : 'Switch to Front Camera'
+                    }
                   >
-                    <Camera className="w-4 h-4" />
-                    {facingMode === 'user' ? 'Front' : 'Rear'}
+                    {switchingCamera ? (
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                      >
+                        <Camera className="w-4 h-4" />
+                      </motion.div>
+                    ) : (
+                      <Camera className="w-4 h-4" />
+                    )}
+                    {switchingCamera ? 'Switching' : facingMode === 'user' ? 'Front' : 'Rear'}
                   </button>
                   <button
                     onClick={() => setDetectionActive(!detectionActive)}
