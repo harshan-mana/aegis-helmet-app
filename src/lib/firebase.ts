@@ -12,6 +12,19 @@ const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || '(default)');
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+// Always ask Google WHICH account to use instead of silently reusing the
+// previously signed-in one. Without this, after signing out of AEGIS the next
+// "Sign in with Google" silently re-authenticates the last Google account.
+//
+// Applied to THIS exported singleton, which is the exact instance passed to
+// signInWithPopup() by both AuthModal and LandingPage, so the setting can
+// never be lost by using a different provider object.
+//
+// This only affects which AEGIS/Firebase account is used. It does NOT sign the
+// user out of Google or any other Google service (revokeAccessToken is never
+// called), and Google's own page still handles any password entry.
+googleProvider.setCustomParameters({ prompt: 'select_account' });
+
 export const appleProvider = new OAuthProvider('apple.com');
 
 // Enable Firebase Auth

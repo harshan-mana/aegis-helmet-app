@@ -57,7 +57,15 @@ export default function LandingPage({ onLogin }: LandingPageProps) {
       };
       onLogin(user);
     } catch (e: any) {
-      setError(e?.message || 'Google sign-in failed');
+      // Treat a closed account chooser as a normal, quiet outcome rather than
+      // an error — the user simply decided not to pick an account.
+      if (e?.code === 'auth/popup-closed-by-user' || e?.code === 'auth/cancelled-popup-request') {
+        setError('');
+      } else if (e?.code === 'auth/popup-blocked') {
+        setError('Pop-up was blocked. Allow pop-ups for this site and try again.');
+      } else {
+        setError(e?.message || 'Google sign-in failed');
+      }
       setIsAuthenticating(false);
     }
   };
