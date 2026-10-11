@@ -7,10 +7,101 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>AegisHelmet AI | Smart Traffic Safety</title>
+
+    <!--
+      Boot guard.
+      This is a CLASSIC (non-module) script, so it runs even when the app
+      bundle fails to execute — for example when the site is published in a
+      mode that serves the raw source, when the network drops, or when a
+      stale cached page is loaded. In those cases React never mounts, so the
+      #root element would stay empty and the user would see a blank page.
+      This shows a real, actionable recovery message instead of hiding the
+      failure. It never masks a running app: as soon as React renders
+      anything into #root, the guard is considered satisfied and never fires.
+    -->
+    <script>
+      (function () {
+        var root = document.getElementById('root');
+        var booted = false;
+
+        function isBooted() {
+          if (booted) return true;
+          if (root && root.childElementCount > 0) {
+            booted = true;
+            return true;
+          }
+          return false;
+        }
+
+        try {
+          if (root && typeof MutationObserver !== 'undefined') {
+            new MutationObserver(function () {
+              if (root.childElementCount > 0) booted = true;
+            }).observe(root, { childList: true, subtree: true });
+          }
+        } catch (e) {
+          /* observer is optional */
+        }
+
+        function showRecovery(message) {
+          if (isBooted() || !root) return;
+          root.innerHTML = '';
+          var wrap = document.createElement('div');
+          wrap.style.cssText =
+            'min-height:100vh;display:flex;align-items:center;justify-content:center;' +
+            'padding:24px;background:#0a0a0f;color:#fff;' +
+            'font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+          var box = document.createElement('div');
+          box.style.cssText = 'max-width:420px;text-align:center';
+          var h = document.createElement('h1');
+          h.textContent = 'AEGIS AI could not start';
+          h.style.cssText = 'font-size:19px;font-weight:800;margin:0 0 10px;letter-spacing:.02em';
+          var p = document.createElement('p');
+          p.textContent = message;
+          p.style.cssText =
+            'font-size:13px;line-height:1.6;color:rgba(255,255,255,.6);margin:0 0 20px';
+          var b = document.createElement('button');
+          b.textContent = 'Reload';
+          b.style.cssText =
+            'padding:11px 28px;border-radius:9999px;border:0;background:#FF6B35;color:#000;' +
+            'font-weight:800;font-size:12px;letter-spacing:.1em;cursor:pointer';
+          b.onclick = function () {
+            window.location.reload();
+          };
+          box.appendChild(h);
+          box.appendChild(p);
+          box.appendChild(b);
+          wrap.appendChild(box);
+          root.appendChild(wrap);
+        }
+
+        // Exposed so the app can report a hard boot failure with context.
+        window.__aegisBootGuard = showRecovery;
+
+        // A script/style that fails to load means the app cannot boot.
+        window.addEventListener(
+          'error',
+          function (e) {
+            var el = e && e.target;
+            if (el && (el.tagName === 'SCRIPT' || el.tagName === 'LINK')) {
+              showRecovery(
+                'A required file failed to load. This is usually a network hiccup or a stale cached page. Reload to try again.'
+              );
+            }
+          },
+          true
+        );
+
+        window.setTimeout(function () {
+          showRecovery(
+            'The application did not finish loading. This is usually a network hiccup or a stale cached page. Reload to try again.'
+          );
+        }, 10000);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="./src/main.tsx"></script>
   </body>
 </html>
-

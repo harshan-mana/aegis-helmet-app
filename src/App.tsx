@@ -111,15 +111,40 @@ export default function App() {
     if (greetedUidRef.current === uid) return;
     greetedUidRef.current = uid;
     let already = false;
+    let name = '';
     try {
       const flagKey = 'aegis_seen_welcome_' + uid;
       already = localStorage.getItem(flagKey) === '1';
       localStorage.setItem(flagKey, '1');
+      const raw = localStorage.getItem('aegis_user_profile');
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (p && p.name) name = String(p.name);
+      }
     } catch {}
-    setGreeting(already ? 'Welcome back to the Aegis application' : 'Hello Welcome to the Aegis application');
-    const t = setTimeout(() => setGreeting(null), 3500);
-    return () => clearTimeout(t);
+    if (!name && effectiveUser.displayName) name = String(effectiveUser.displayName);
+    setGreeting(
+      !name
+        ? already
+          ? 'Welcome back to the Aegis application'
+          : 'Hello Welcome to the Aegis application'
+        : already
+        ? `Welcome back, ${name}!`
+        : `Hello ${name}! Welcome to the Aegis application`
+    );
   }, [effectiveUser, showLanding]);
+
+  // Auto-dismiss the welcome toast after ~3 seconds.
+  // This lives in its OWN effect keyed on `greeting` so it always re-arms.
+  // Previously the timer lived inside the greeting effect: that effect's
+  // cleanup cancelled the timer on every re-run (Firestore snapshot, auth
+  // listener, re-render) while an early-return guard stopped a new timer
+  // being created — so the toast could stay on screen indefinitely.
+  useEffect(() => {
+    if (!greeting) return;
+    const t = setTimeout(() => setGreeting(null), 3000);
+    return () => clearTimeout(t);
+  }, [greeting]);
 
   const isProfileComplete = () => {
     const saved = localStorage.getItem('aegis_user_profile');
@@ -506,11 +531,11 @@ export default function App() {
       <AnimatePresence>
         {greeting && (
           <motion.div
-            initial={{ opacity: 0, y: -14 }}
+            initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -14 }}
+            exit={{ opacity: 0, y: 14 }}
             transition={{ duration: 0.25, ease: 'easeOut' }}
-            className="fixed top-4 left-1/2 -translate-x-1/2 z-[95] bg-cyber-blue text-black px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black shadow-lg max-w-[90vw] w-max text-center"
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[95] bg-cyber-blue text-black px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black shadow-lg max-w-[92vw] w-max text-center"
           >
             <span>{greeting}</span>
           </motion.div>

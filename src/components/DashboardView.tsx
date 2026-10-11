@@ -639,15 +639,18 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   const pickDeviceId = async (desired: 'user' | 'environment'): Promise<string | null> => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
-      const cams = devices.filter((d) => d.kind === 'videoinput');
+      const cams = devices.filter((d) => d.kind === 'videoinput' && d.deviceId);
       if (!cams.length) return null;
+      // Labels are ONLY populated once camera permission has been granted.
+      // Before that they are empty, so any device we picked would be a blind
+      // guess — in that case fall through to the facingMode constraints,
+      // which are reliable for selecting the rear camera on Android Chrome.
+      const labelled = cams.filter((d) => (d.label || '').length > 0);
+      if (!labelled.length) return null;
       const rearRe = /back|rear|environment|world/i;
       const frontRe = /front|user|face|selfie/i;
       const wantRear = desired === 'environment';
-      let match = cams.find((d) => (wantRear ? rearRe : frontRe).test(d.label || ''));
-      // Fall back to ordering when labels are empty/unhelpful: on phones the
-      // front camera is usually listed first.
-      if (!match && cams.length > 1) match = wantRear ? cams[cams.length - 1] : cams[0];
+      const match = labelled.find((d) => (wantRear ? rearRe : frontRe).test(d.label || ''));
       return match?.deviceId ?? null;
     } catch {
       return null;
@@ -1384,13 +1387,16 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
               )}
             </div>
 
-            {/* Video element - always rendered so ref is available for auto-start */}
+            {/* Video element — always rendered and visible in layout. A display:none
+                video stops delivering frames, which makes camera switching
+                report a false failure; the standby overlay below covers it
+                instead. */}
             <video
               ref={videoRef}
               autoPlay
               playsInline
               muted
-              className={`w-full h-full object-cover ${isWebcamActive ? 'block' : 'hidden'}`}
+              className="w-full h-full object-cover"
             />
             <canvas ref={canvasRef} className="hidden" />
             <canvas
@@ -1429,7 +1435,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
 
             {/* Placeholder when camera is not active */}
             {!isWebcamActive && (
-              <div className="absolute inset-0 flex items-center justify-center">
+              <div className="absolute inset-0 flex items-center justify-center bg-black">
                 <div className="text-center p-8 z-30">
                   <Camera className="w-16 h-16 text-white/10 mx-auto mb-4" />
                   <h3 className="text-lg font-bold text-white/60 mb-1">Camera Standby</h3>
