@@ -55,17 +55,12 @@ export default function App() {
   // guarantees we can never hang on it.
   const [authResolved, setAuthResolved] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
-  // Skip the landing page when a session already exists, so a page refresh or
-  // browser restart keeps the user signed in. The landing page only shows for
-  // genuinely new (signed-out) visitors.
-  const [showLanding, setShowLanding] = useState<boolean>(() => {
-    if (auth.currentUser) return false;
-    try {
-      return !localStorage.getItem(LOCAL_AUTH_STORAGE_KEY);
-    } catch {
-      return true;
-    }
-  });
+  // The landing/sign-in screen is no longer stored as state that was guessed
+  // at mount from auth.currentUser / localStorage — at first render Firebase
+  // has not restored the session yet, so a returning Google/Apple user was
+  // permanently stuck on "Sign in with Google" after a refresh
+  // (auth.currentUser === null AND no stored local account).
+  // It is derived purely from the RESOLVED session further below.
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isServiceProviderOpen, setIsServiceProviderOpen] = useState(false);
   const [showProfilePrompt, setShowProfilePrompt] = useState(false);
@@ -87,6 +82,13 @@ export default function App() {
   });
 
   const effectiveUser = user || localUser;
+
+  // Landing / sign-in screen decision — DERIVED, never guessed at mount.
+  // Until Firebase resolves we are behind the splash anyway, so this only
+  // becomes meaningful once the real session is known:
+  //   resolved + session present -> dashboard (no login screen on refresh)
+  //   resolved + no session       -> landing / sign-in
+  const showLanding = authResolved ? !effectiveUser : true;
 
   // Splash screen timer.
   // Held until the full entrance sequence finishes (progress bar starts at
@@ -281,6 +283,8 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
+    // Only an explicit sign-out reaches this function. Nothing else in the app
+    // calls auth.signOut(), so a refresh can never log the user out.
     try {
       localStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
       localStorage.removeItem('aegis_guest_active');
@@ -299,6 +303,8 @@ export default function App() {
     } catch (e) {
       console.warn('Firebase sign out error:', e);
     }
+    // Clearing `user`/`localUser` is enough: `showLanding` is derived from the
+    // resolved session, so the landing / sign-in screen returns automatically.
   };
 
   const handleNewUser = async (uid: string, email: string) => {
@@ -420,7 +426,8 @@ export default function App() {
     return <LandingPage onLogin={(user) => {
       setLocalUser(user);
       setUserRole(user.role || 'Driver');
-      setShowLanding(false);
+      // No setShowLanding needed: `showLanding` is derived from the resolved
+      // session, so setting the user automatically leaves the landing screen.
       // Check if profile is complete — only ever prompted right after a login.
       if (!isProfileComplete()) {
         requestProfilePrompt();

@@ -3,7 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { Chrome, Apple, Mail, X, ArrowLeft, Zap, CheckCircle2, Loader2, Lock, Shield, User, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, User as FirebaseUser } from 'firebase/auth';
-import { auth, googleProvider, appleProvider } from '../lib/firebase';
+import { auth, googleProvider, appleProvider, authPersistenceReady } from '../lib/firebase';
 import { AegisAuthUser, LOCAL_AUTH_STORAGE_KEY } from '../types/auth';
 
 interface AuthModalProps {
@@ -79,6 +79,9 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
     setAuthStep('connecting');
     setIsAuthenticating(true);
     try {
+      // Ensure browserLocalPersistence is applied to THIS auth instance before
+      // signing in, so the session reliably survives a refresh.
+      await authPersistenceReady;
       const cred = await signInWithPopup(auth, googleProvider);
       setAuthStep('success');
       setSimulatedAccount({
@@ -113,6 +116,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
     setAuthStep('connecting');
     setIsAuthenticating(true);
     try {
+      await authPersistenceReady;
       const cred = await signInWithPopup(auth, appleProvider);
       setAuthStep('success');
       setSimulatedAccount({
@@ -162,6 +166,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
     setAuthStep('connecting');
     setIsAuthenticating(true);
     try {
+      await authPersistenceReady;
       let userCred;
       if (isLogin) {
         userCred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);

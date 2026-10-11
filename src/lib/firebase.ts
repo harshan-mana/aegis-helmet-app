@@ -1,10 +1,14 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup, onAuthStateChanged, User, browserLocalPersistence, setPersistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-// Always use the Firebase auth domain - authorized domains are managed in Firebase Console
-const app = initializeApp(firebaseConfig);
+// Always use the Firebase auth domain - authorized domains are managed in Firebase Console.
+// Guard against duplicate initialisation: a second initializeApp call throws
+// "[DEFAULT] already exists", and a duplicate App means two Auth instances where
+// the one we configure persistence on may not be the one used for sign-in.
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || '(default)');
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
@@ -13,11 +17,24 @@ export const appleProvider = new OAuthProvider('apple.com');
 // Enable Firebase Auth
 try {
   auth.useDeviceLanguage();
-  // Keep the user logged in across reloads / browser restarts
-  setPersistence(auth, browserLocalPersistence).catch((e) => console.warn('Persistence warning:', e));
 } catch (e) {
   console.warn('Firebase auth init warning:', e);
 }
+
+/**
+ * Resolves once persistence has been applied to THIS auth instance.
+ * browserLocalPersistence stores the session in localStorage so a page refresh or
+ * browser restart restores the user instead of showing the sign-in screen.
+ * Sign-in flows await this before calling signInWith* so persistence is
+ * guaranteed to be applied to the same instance used for sign-in.
+ */
+export const authPersistenceReady: Promise<void> = (async () => {
+  try {
+    await setPersistence(auth, browserLocalPersistence);
+  } catch (e) {
+    console.warn('Firebase persistence warning:', e);
+  }
+})();
 
 // Session is considered expired after 7 days of inactivity
 export const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
