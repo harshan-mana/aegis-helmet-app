@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { SESSION_MAX_AGE_MS } from './lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { Shield, ShieldAlert, User, Phone, Save, Zap, Settings, LogOut, ChevronDown, Palette, Moon, Sun, Sparkles } from 'lucide-react';
@@ -50,6 +49,11 @@ export default function App() {
   });
   const [currentView, setCurrentView] = useState<'dashboard' | 'violations' | 'authority' | 'profile' | 'settings'>('dashboard');
   const [loading, setLoading] = useState(true);
+  // True once Firebase has resolved the persisted auth state. The UI waits for
+  // this before rendering the app or the sign-in screen, so a restoring
+  // session is never mistaken for "logged out". The safety timeout below
+  // guarantees we can never hang on it.
+  const [authResolved, setAuthResolved] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   // Skip the landing page when a session already exists, so a page refresh or
   // browser restart keeps the user signed in. The landing page only shows for
@@ -97,6 +101,13 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('aegis_theme', currentTheme);
   }, [currentTheme]);
+
+  // Safety net: if Firebase never resolves (offline/blocked), stop waiting so
+  // the app still renders instead of hanging on the splash.
+  useEffect(() => {
+    const t = setTimeout(() => setAuthResolved(true), 6000);
+    return () => clearTimeout(t);
+  }, []);
 
   // Login welcome toast. First-time vs returning is persisted per account, so a
   // refresh never replays the first-time message. Shows once per login session
@@ -186,21 +197,18 @@ export default function App() {
     let unsubscribeProfile: (() => void) | null = null;
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (u) => {
-      // Expiration check: sign out if the session is older than SESSION_MAX_AGE_MS
-      const savedAt = Number(localStorage.getItem('aegis_auth_time') || '0');
-      if (u && savedAt && Date.now() - savedAt > SESSION_MAX_AGE_MS) {
-        try { localStorage.removeItem('aegis_auth_time'); } catch {}
-        setLocalUser(null);
-        setUserRole(null);
-        setShowProfilePrompt(false);
-        try { await signOut(auth); } catch {}
-        setLoading(false);
-        return;
-      }
-      // Persist session persistence anchor (do not reset on every reload)
-      if (u && !localStorage.getItem('aegis_auth_time')) {
-        try { localStorage.setItem('aegis_auth_time', String(Date.now())); } catch {}
-      }
+      // Firebase has now resolved the persisted session (from
+      // browserLocalPersistence). Only after this point is it safe to decide
+      // whether to render the app or the sign-in screen — a transient `null`
+      // before restoration completes must NOT be treated as a logout.
+      setAuthResolved(true);
+
+      // NOTE: there is deliberately no automatic sign-out here. The previous
+      // 7-day `aegis_auth_time` check called signOut() during initialisation,
+      // which silently signed the user out on a refresh once that absolute
+      // window elapsed. Sessions now persist until the user explicitly signs
+      // out; Firebase continues to refresh its own tokens in the background.
+
       setUser(u);
       if (unsubscribeProfile) unsubscribeProfile();
 
@@ -353,8 +361,10 @@ export default function App() {
   const theme = THEMES.find(t => t.id === currentTheme) || THEMES[0];
 
   // Splash Screen — fully opaque so nothing (e.g. the sign-in screen) shows
-  // through it while it animates.
-  if (showSplash) {
+  // through it while it animates. Also held until Firebase has resolved the
+  // persisted session, so a refresh never flashes the sign-in screen before
+  // the returning session is restored.
+  if (showSplash || !authResolved) {
     return (
       <div className="fixed inset-0 z-[500] h-screen w-screen flex flex-col items-center justify-center bg-[#0a0a0f] relative overflow-hidden">
         <div className="absolute inset-0 cyber-grid opacity-30" />
