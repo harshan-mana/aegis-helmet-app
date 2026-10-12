@@ -81,8 +81,8 @@ function auditImports() {
       if (path.startsWith('./firebase-applet-config.json') || path.startsWith('../..')) continue;
 
       const resolved = resolve(base, path);
-      const found = ['.tsx', '.ts', '/index.tsx', '/index.ts']
-        .map((x) => resolved + x).find((c) => existsSync(c));
+      const found = [resolved, resolved + '.tsx', resolved + '.ts', resolved + '/index.tsx', resolved + '/index.ts']
+        .find((c) => existsSync(c));
       if (!found) { problems.push(`unresolved import: ${f} -> ${path}`); continue; }
 
       if (clause.startsWith('{')) {
