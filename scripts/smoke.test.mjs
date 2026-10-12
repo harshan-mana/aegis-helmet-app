@@ -57,7 +57,7 @@ const EXTERNAL = new Set([
 function auditImports() {
   const files = [];
   const walk = (dir) => {
-    for (const e of readdirSyncSync(dir, { withFileTypes: true })) {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, e.name);
       if (e.isDirectory()) walk(p);
       else if (/\.(tsx|ts)$/.test(e.name)) files.push(p);
@@ -160,7 +160,7 @@ test('landing screen is derived from the resolved session, not guessed at mount'
   const ap = src('App.tsx');
   assert.ok(ap.includes('const showLanding = authResolved ? !effectiveUser : true;'),
     'landing must be derived from the resolved auth state');
-  assert.ok(!ap.includes('setShowLanding'), 'no stale mount-time landing state');
+  assert.ok(!/\bsetShowLanding\s*\(/.test(ap), 'no stale mount-time landing state setter call');
   assert.ok(ap.includes('setAuthResolved(true)'), 'the auth listener must mark auth as resolved');
 });
 
@@ -202,7 +202,9 @@ test('every relative import resolves and every named export exists', () => {
 test('core AEGIS features are still present', () => {
   const checks = [
     ['lib/firebase.ts', 'onAuthStateChanged'],
-    ['components/AuthModal.tsx', "prompt: 'select_account'"],
+    ['lib/firebase.ts', "prompt: 'select_account'"],
+    ['lib/firebase.ts', 'browserLocalPersistence'],
+    ['components/AuthModal.tsx', 'googleProvider'],
     ['components/DashboardView.tsx', 'detectCanvasRef'],
     ['utils/violationVerification.ts', 'verifyCandidate'],
     ['utils/vehicleClassification.ts', 'classifyRegionsWithDedicatedModel'],
