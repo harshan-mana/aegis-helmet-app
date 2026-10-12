@@ -9,7 +9,9 @@
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "node --test scripts/smoke.test.mjs",
+    "verify": "npm run test && npm run lint"
   },
   "dependencies": {
     "@google/genai": "^1.52.0",

@@ -64,6 +64,19 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps && npm install react-is
 
+      # ---------------------------------------------------------------
+      # Regression smoke tests (dependency-free, node:test).
+      # These assert the invariants that have actually produced blank
+      # pages or lost sessions: the boot guard, browserLocalPersistence,
+      # a single explicit sign-out, no beforeunload logout, the landing
+      # screen being derived from the resolved session, camera/model
+      # error containment, and that every import resolves to a real
+      # export. A missing export from an edit used to ship a blank page;
+      # this makes it impossible to merge one.
+      # ---------------------------------------------------------------
+      - name: Smoke tests
+        run: npm test
+
       # HARD GATE. The pre-existing type errors have been fixed, so this now
       # genuinely passes. Any future type error fails the run and nothing is
       # published, which is the intended behaviour: fail loudly here rather
