@@ -9,9 +9,11 @@ permissions:
   pages: write
   id-token: write
 
+# Queue deployments instead of cancelling an in-flight one. Cancelling midway
+# can leave GitHub Pages serving a half-published build (blank page).
 concurrency:
   group: "pages"
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:
@@ -19,6 +21,40 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # ---------------------------------------------------------------------
+      # ROOT-CAUSE GUARD
+      # If Pages "Source" is ever switched back to "Deploy from a branch"
+      # (build_type: legacy) the deploy below is ignored and GitHub serves the
+      # REPOSITORY ROOT, whose index.html points at ./src/main.tsx. The browser
+      # refuses to run it as a module script and the site renders blank.
+      # This step detects that and tries to repair it, failing loudly otherwise
+      # so the problem is never silent again.
+      # ---------------------------------------------------------------------
+      - name: Verify GitHub Pages source is "GitHub Actions"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          current="$(curl -fsSL -H "Authorization: token ${GH_TOKEN}" \
+            "https://api.github.com/repos/${GH_REPO}/pages" | node -e \
+            "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log(JSON.parse(d).build_type||'')}catch(e){console.log('')}})")"
+          echo "Pages build_type: ${current:-unknown}"
+          if [ "${current}" = "workflow" ]; then
+            echo "OK - Pages is served from GitHub Actions builds."
+            exit 0
+          fi
+          echo "::warning::Pages build_type is '${current:-unknown}', not 'workflow'. Attempting repair..."
+          if curl -fsSL -X PUT -H "Authorization: token ${GH_TOKEN}" \
+               -H "Accept: application/vnd.github+json" \
+               -d '{"build_type":"workflow"}' \
+               "https://api.github.com/repos/${GH_REPO}/pages" >/dev/null 2>&1; then
+            echo "Repaired: Pages build_type set to 'workflow'. Re-run this workflow if the deployment does not complete."
+          else
+            echo "::error title=Blank page cause::Pages is set to publish from the repository branch (legacy), which serves raw source and renders a BLANK page. This workflow cannot change that setting. Fix it manually once in GitHub: repo -> Settings -> Pages -> Build and deployment -> Source = 'GitHub Actions'."
+            exit 1
+          fi
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -28,8 +64,39 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps && npm install react-is
 
+      # Reported on every run, but advisory only: turning this into a hard
+      # gate would block all deployments until the pre-existing type backlog is
+      # cleared, so it never blocks the (working) production build.
+      - name: Type check (advisory)
+        continue-on-error: true
+        run: npm run lint
+
       - name: Build
         run: npm run build
+
+      # ---------------------------------------------------------------------
+      # Never publish an empty or incomplete artifact. A build that produced no
+      # dist/index.html, or one that still references ./src/main.tsx (i.e. raw
+      # source), would deploy a blank page.
+      # ---------------------------------------------------------------------
+      - name: Verify build artifact
+        run: |
+          set -euo pipefail
+          if [ ! -f dist/index.html ]; then
+            echo "::error::dist/index.html was not produced - refusing to deploy an incomplete build."
+            exit 1
+          fi
+          if grep -q 'src/main\.tsx' dist/index.html; then
+            echo "::error::dist/index.html still references src/main.tsx (raw source). Refusing to deploy."
+            exit 1
+          fi
+          if ! grep -q '\./assets/' dist/index.html; then
+            echo "::error::dist/index.html does not reference the built ./assets/ bundle. Refusing to deploy."
+            exit 1
+          fi
+          echo "Asset references:"
+          grep -o '\./assets/[^"]*' dist/index.html | sort -u
+          echo "dist size: $(du -sh dist | cut -f1)"
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -42,3 +109,35 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      # Final proof the live URL actually serves the built app. This is the
+      # exact condition that previously produced a silent blank page.
+      - name: Verify deployed site
+        env:
+          SITE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          url="${SITE_URL%/}/"
+          echo "Checking ${url}"
+          ok=0
+          for i in $(seq 1 12); do
+            if curl -fsSL "${url}?verify=${GITHUB_RUN_ID}" -o page.html 2>/dev/null; then
+              ok=1
+              break
+            fi
+            echo "  attempt $i: not reachable yet, waiting..."
+            sleep 10
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::Deployed site is not reachable."
+            exit 1
+          fi
+          if grep -q 'src/main\.tsx' page.html; then
+            echo "::error::The live site is serving RAW SOURCE (src/main.tsx) instead of the build - this renders a BLANK page. Set Pages source to 'GitHub Actions'."
+            exit 1
+          fi
+          if ! grep -q 'assets/index' page.html; then
+            echo "::error::The live site is not serving the built JS bundle."
+            exit 1
+          fi
+          echo "Live site is serving the built application."
