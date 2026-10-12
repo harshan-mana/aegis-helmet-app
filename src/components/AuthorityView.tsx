@@ -1186,7 +1186,7 @@ export default function AuthorityView() {
                     </label>
                     <select
                       value={vehicleForm.vehicleType}
-                      onChange={(e) => setVehicleForm({ ...vehicleForm, vehicleType: e.target.value })}
+                      onChange={(e) => setVehicleForm({ ...vehicleForm, vehicleType: e.target.value as typeof vehicleForm.vehicleType })}
                       className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:border-cyber-blue"
                     >
                       <option value="Motorcycle" className="bg-black text-white">Motorcycle</option>
@@ -1219,7 +1219,7 @@ export default function AuthorityView() {
                     </label>
                     <select
                       value={vehicleForm.status}
-                      onChange={(e) => setVehicleForm({ ...vehicleForm, status: e.target.value })}
+                      onChange={(e) => setVehicleForm({ ...vehicleForm, status: e.target.value as typeof vehicleForm.status })}
                       className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:border-cyber-blue"
                     >
                       <option value="Active" className="bg-black text-white">Active</option>

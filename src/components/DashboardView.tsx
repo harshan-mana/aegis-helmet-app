@@ -240,7 +240,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     violationType: string | null;
     reasons: string[];
   } | null>(null);
-  const captureResultTimerRef = useRef(0);
+  const captureResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Guards against overlapping manual + automatic captures writing twice.
   const autoCaptureInFlightRef = useRef(false);
 

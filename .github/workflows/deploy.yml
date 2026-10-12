@@ -64,11 +64,11 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps && npm install react-is
 
-      # Reported on every run, but advisory only: turning this into a hard
-      # gate would block all deployments until the pre-existing type backlog is
-      # cleared, so it never blocks the (working) production build.
-      - name: Type check (advisory)
-        continue-on-error: true
+      # HARD GATE. The pre-existing type errors have been fixed, so this now
+      # genuinely passes. Any future type error fails the run and nothing is
+      # published, which is the intended behaviour: fail loudly here rather
+      # than ship a broken build.
+      - name: Type check
         run: npm run lint
 
       - name: Build
