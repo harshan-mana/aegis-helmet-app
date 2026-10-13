@@ -472,6 +472,24 @@ export default function AuthModal({ isOpen, onClose, onLogin }: AuthModalProps) 
                                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                               </button>
                             </div>
+                            {/* Synchronized with the eye toggle above: both drive the
+                                same `showPassword` state, so enabling either reveals
+                                the password and disabling either masks it. The
+                                entered value is never modified - only the input
+                                `type` changes. */}
+                            <label
+                              htmlFor="checkbox-auth-show-password"
+                              className="flex items-center gap-2 mt-2 text-[11px] font-bold text-white/60 hover:text-white cursor-pointer select-none touch-manipulation"
+                            >
+                              <input
+                                id="checkbox-auth-show-password"
+                                type="checkbox"
+                                checked={showPassword}
+                                onChange={(e) => setShowPassword(e.target.checked)}
+                                className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 accent-cyber-blue cursor-pointer"
+                              />
+                              Show password
+                            </label>
                           </div>
 
                           <button 

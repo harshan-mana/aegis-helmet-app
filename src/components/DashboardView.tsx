@@ -1801,57 +1801,87 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
 
         {/* RIGHT COLUMN: Quick Actions & Status */}
         <div className="space-y-4">
-          {/* Quick SOS with Add Contact */}
-          <div className="glass-panel p-5 border-cyber-red/30 bg-cyber-red/5 space-y-3">
+          {/* Emergency Contacts: emergency services + personal contacts in one
+                unified panel, matching the dark AEGIS card language. */}
+          <div className="glass-panel p-5 border-white/10 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-black uppercase tracking-widest text-cyber-red flex items-center gap-2">
-                <ShieldAlert className="w-4 h-4" /> Emergency SOS
+              <h3 className="text-xs font-black uppercase tracking-widest text-white flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-cyber-red" /> Emergency Contacts
               </h3>
               <button
                 onClick={() => setIsAddContactOpen(true)}
-                className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-wider text-white/60 hover:text-white transition-all touch-manipulation"
                 title="Add Emergency Contact"
               >
-                <Plus className="w-3.5 h-3.5 text-white/60" />
+                <Plus className="w-3.5 h-3.5" /> Add
               </button>
             </div>
+
+            {/* Emergency services - prominent, distinct colours, real tel: actions */}
             <div className="space-y-2">
-              <a
-                href="tel:100"
-                className="w-full py-3 bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-blue-500/30 transition-all"
-              >
-                <AlertOctagon className="w-4 h-4" /> Police: 100
-              </a>
-              <a
-                href="tel:102"
-                className="w-full py-3 bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-red-500/30 transition-all"
-              >
-                <Heart className="w-4 h-4" /> Ambulance: 102
-              </a>
-              <a
-                href="tel:112"
-                className="w-full py-3 bg-white/5 border border-white/10 text-white/70 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-white/10 transition-all"
-              >
-                <Phone className="w-4 h-4" /> Emergency: 112
-              </a>
-              {/* Custom saved contacts */}
-              {savedContacts.map((contact) => (
-                <div key={contact.id} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <Phone className="w-3.5 h-3.5 text-white/50" />
-                    <span className="text-xs font-bold text-white">{contact.name}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <a href={`tel:${contact.phone}`} className="text-xs font-mono text-cyber-blue hover:underline">
-                      {contact.phone}
-                    </a>
-                    <button onClick={() => removeContact(contact.id)} className="text-white/20 hover:text-cyber-red">
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+              <p className="text-[9px] font-black uppercase tracking-widest text-white/30">Emergency Services</p>
+              <div className="space-y-2">
+                <a
+                  href="tel:100"
+                  className="w-full py-3.5 bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-blue-500/30 active:scale-[0.99] transition-all touch-manipulation"
+                >
+                  <AlertOctagon className="w-4 h-4" /> Police <span className="font-mono">100</span>
+                </a>
+                <a
+                  href="tel:102"
+                  className="w-full py-3.5 bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-red-500/30 active:scale-[0.99] transition-all touch-manipulation"
+                >
+                  <Heart className="w-4 h-4" /> Ambulance <span className="font-mono">102</span>
+                </a>
+                <a
+                  href="tel:112"
+                  className="w-full py-3.5 bg-white/5 border border-white/10 text-white/70 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-white/10 active:scale-[0.99] transition-all touch-manipulation"
+                >
+                  <Phone className="w-4 h-4" /> Emergency <span className="font-mono">112</span>
+                </a>
+              </div>
             </div>
+
+            {/* Saved personal contacts - clean, consistent rows */}
+            {savedContacts.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-[9px] font-black uppercase tracking-widest text-white/30">Saved Contacts</p>
+                <div className="space-y-2">
+                  {savedContacts.map((contact) => (
+                    <div
+                      key={contact.id}
+                      className="flex items-center justify-between gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-full bg-cyber-blue/15 border border-cyber-blue/20 flex items-center justify-center shrink-0">
+                          <User className="w-3.5 h-3.5 text-cyber-blue" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-white truncate">{contact.name}</p>
+                          <p className="text-[10px] font-mono text-white/40">{contact.phone}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <a
+                          href={`tel:${contact.phone}`}
+                          aria-label={`Call ${contact.name}`}
+                          className="p-2 bg-cyber-blue/10 text-cyber-blue rounded-lg hover:bg-cyber-blue/20 transition-colors touch-manipulation"
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                        </a>
+                        <button
+                          onClick={() => removeContact(contact.id)}
+                          aria-label={`Delete ${contact.name}`}
+                          className="p-2 bg-white/5 text-white/30 rounded-lg hover:text-cyber-red hover:bg-cyber-red/10 transition-colors touch-manipulation"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* System Status */}
@@ -1876,32 +1906,9 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
             </div>
           </div>
 
-          {/* Saved Contacts */}
-          {savedContacts.length > 0 && (
-            <div className="glass-panel p-5 border-white/10 space-y-3">
-              <h3 className="text-xs font-black uppercase tracking-widest text-white flex items-center gap-2">
-                <User className="w-4 h-4 text-cyber-blue" /> Saved Contacts
-              </h3>
-              <div className="space-y-2">
-                {savedContacts.map((contact) => (
-                  <div key={contact.id} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
-                    <div>
-                      <p className="text-xs font-bold text-white">{contact.name}</p>
-                      <p className="text-[10px] font-mono text-white/40">{contact.phone}</p>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <a href={`tel:${contact.phone}`} className="p-2 bg-cyber-blue/10 text-cyber-blue rounded-lg hover:bg-cyber-blue/20">
-                        <Phone className="w-3.5 h-3.5" />
-                      </a>
-                      <button onClick={() => removeContact(contact.id)} className="p-2 bg-white/5 text-white/30 rounded-lg hover:text-cyber-red">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* (Saved Contacts are shown inside the unified Emergency Contacts
+                panel above - this separate card was removed to avoid duplication
+                and to keep one consistent card style.) */}
         </div>
       </div>
 
