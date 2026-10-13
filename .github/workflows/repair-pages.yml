@@ -1,0 +1,107 @@
+name: Repair Pages (self-healing)
+
+# ---------------------------------------------------------------------------
+# WHY THIS EXISTS
+#
+# The single most common cause of a blank AEGIS page is GitHub Pages flipping
+# from "GitHub Actions" (workflow) back to "Deploy from a branch" (legacy).
+# In legacy mode Pages serves the REPOSITORY ROOT, whose index.html points at
+# ./src/main.tsx. The browser refuses to execute raw TSX as a module script, so
+# the page renders blank. This has happened repeatedly and is not something a
+# human should have to notice.
+#
+# This workflow is the safety net: it runs on a schedule and immediately after
+# every deploy, verifies the live site is actually serving the BUILT bundle, and
+# repairs + redeploys automatically if it is not. No human in the loop.
+# ---------------------------------------------------------------------------
+
+on:
+  schedule:
+    # Every 10 minutes. Cheap when healthy (two curl calls), and bounds the
+    # blank-page window to ~10 minutes if Pages ever reverts.
+    - cron: '*/10 * * * *'
+
+  # Run right after every deploy, so a bad deploy is caught immediately.
+  workflow_run:
+    workflows: ["Deploy to GitHub Pages"]
+    types: [completed]
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  actions: write
+  id-token: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure Pages build_type is "workflow"
+        id: pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          current="$(curl -fsSL -H "Authorization: token ${GH_TOKEN}" \
+            "https://api.github.com/repos/${GH_REPO}/pages" | node -e \
+            "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log(JSON.parse(d).build_type||'')}catch(e){console.log('')}})")"
+          echo "Pages build_type: ${current:-unknown}"
+          if [ "${current}" = "workflow" ]; then
+            echo "OK - Pages is served from GitHub Actions builds."
+            exit 0
+          fi
+          echo "::warning::Pages build_type is '${current:-unknown}', not 'workflow'. Repairing..."
+          if curl -fsSL -X PUT -H "Authorization: token ${GH_TOKEN}" \
+               -H "Accept: application/vnd.github+json" \
+               -d '{"build_type":"workflow"}' \
+               "https://api.github.com/repos/${GH_REPO}/pages" >/dev/null 2>&1; then
+            echo "Repaired: Pages build_type set to 'workflow'."
+          else
+            echo "::error::Could not set Pages build_type to 'workflow'. Fix manually: repo -> Settings -> Pages -> Build and deployment -> Source = 'GitHub Actions'."
+            exit 1
+          fi
+
+      - name: Verify the live site serves the built bundle
+        id: site
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          url="https://harshan-mana.github.io/aegis-helmet-app/"
+          echo "Checking ${url}"
+          html="$(curl -fsSL "${url}?repair=${GITHUB_RUN_ID}" -o page.html && cat page.html || true)"
+
+          if [ -z "$html" ]; then
+            echo "::error::Deployed site is not reachable."
+            exit 1
+          fi
+          if grep -q 'src/main\.tsx' page.html; then
+            echo "::error::The live site is serving RAW SOURCE (src/main.tsx) instead of the build - this renders a BLANK page."
+            echo "needs_redeploy=true" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          if ! grep -q 'assets/index' page.html; then
+            echo "::error::The live site is not serving the built JS bundle."
+            echo "needs_redeploy=true" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "Live site is serving the built application."
+          grep -o 'assets/index-[^"]*\.js' page.html | sort -u
+
+      - name: Redeploy if the site is broken
+        if: failure() && steps.site.outputs.needs_redeploy == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          echo "Triggering a fresh deploy of the main branch..."
+          curl -fsSL -X POST -H "Authorization: token ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GH_REPO}/actions/workflows/deploy.yml/dispatches" \
+            -d '{"ref":"main"}'
+          echo "Redeploy triggered. The next run of this workflow will confirm the fix."

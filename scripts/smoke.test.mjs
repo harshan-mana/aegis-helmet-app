@@ -216,3 +216,25 @@ test('core AEGIS features are still present', () => {
     assert.ok(src(file).includes(token), `${file} lost ${token}`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// 7. Self-healing: the blank-page cause is corrected automatically
+// ---------------------------------------------------------------------------
+test('a scheduled repair workflow exists and checks the real failure modes', () => {
+  const wf = read(join(ROOT, '.github', 'workflows', 'repair-pages.yml'));
+  assert.ok(wf.includes('schedule:'), 'repair workflow must run on a schedule (no human needed)');
+  assert.ok(wf.includes('cron:'), 'repair workflow must have a cron trigger');
+  assert.ok(wf.includes('build_type'), 'repair workflow must verify Pages build_type');
+  assert.ok(wf.includes('src/main.tsx'), 'repair workflow must detect raw-source serving (the blank-page signature)');
+  assert.ok(wf.includes('assets/index'), 'repair workflow must verify the built bundle is served');
+  assert.ok(wf.includes('workflow_run'), 'repair workflow must also run right after deploys');
+});
+
+test('the deploy workflow refuses to publish a blank or raw-source build', () => {
+  const wf = read(join(ROOT, '.github', 'workflows', 'deploy.yml'));
+  assert.ok(wf.includes('build_type'), 'deploy must verify Pages build_type');
+  assert.ok(wf.includes('src/main.tsx'), 'deploy must reject a build still referencing raw source');
+  assert.ok(wf.includes('assets/'), 'deploy must require the built assets bundle');
+  assert.ok(wf.includes('npm run lint'), 'deploy must run the TypeScript check as a hard gate');
+  assert.ok(wf.includes('npm test'), 'deploy must run the smoke tests');
+});
