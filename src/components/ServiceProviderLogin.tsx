@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X, Lock, Shield, AlertTriangle, CheckCircle, Database, Trash2, Plus, Download } from 'lucide-react';
+import { X, Lock, Shield, AlertTriangle, CheckCircle, Database, Trash2, Plus, Download, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth } from '../lib/firebase';
 import { collection, getDocs, deleteDoc, doc, setDoc } from 'firebase/firestore';
@@ -15,6 +15,7 @@ const SERVICE_PROVIDER_PASSWORD = 'aegis-admin-2026';
 export default function ServiceProviderLogin({ isOpen, onClose }: ServiceProviderLoginProps) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -162,13 +163,36 @@ export default function ServiceProviderLogin({ isOpen, onClose }: ServiceProvide
                         <div className="relative">
                           <Lock className="w-4 h-4 text-white/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
                           <input
-                            type="password"
+                            id="input-sp-password"
+                            type={showPassword ? 'text' : 'password'}
                             placeholder="Enter provider password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-sm text-white focus:outline-none focus:border-cyber-purple"
+                            className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-12 py-3 text-sm text-white focus:outline-none focus:border-cyber-purple"
                           />
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword((s) => !s)}
+                            aria-label={showPassword ? 'Hide password' : 'Show password'}
+                            aria-pressed={showPassword}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 text-white/40 hover:text-white transition-colors touch-manipulation"
+                          >
+                            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
                         </div>
+                        <label
+                          htmlFor="checkbox-sp-show-password"
+                          className="flex items-center gap-2 mt-2 text-[11px] font-bold text-white/60 hover:text-white cursor-pointer select-none touch-manipulation"
+                        >
+                          <input
+                            id="checkbox-sp-show-password"
+                            type="checkbox"
+                            checked={showPassword}
+                            onChange={(e) => setShowPassword(e.target.checked)}
+                            className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 accent-cyber-purple cursor-pointer"
+                          />
+                          Show password
+                        </label>
                       </div>
                       {error && (
                         <p className="text-xs text-red-400 bg-red-500/10 p-3 rounded-xl border border-red-500/20">

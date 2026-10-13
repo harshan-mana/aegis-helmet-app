@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Shield, Chrome, Apple, Mail, User, Lock, ArrowRight, ArrowLeft, Zap } from 'lucide-react';
+import { Shield, Chrome, Apple, Mail, User, Lock, ArrowRight, ArrowLeft, Zap, Eye, EyeOff } from 'lucide-react';
 import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { auth, googleProvider, appleProvider } from '../lib/firebase';
 import { AegisAuthUser } from '../types/auth';
@@ -22,6 +22,8 @@ export default function LandingPage({ onLogin }: LandingPageProps) {
   const [guestId, setGuestId] = useState('');
   const [guestName, setGuestName] = useState('');
   const [guestPassword, setGuestPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showGuestPassword, setShowGuestPassword] = useState(false);
   const [isCreatingGuest, setIsCreatingGuest] = useState(false);
   const [guestAccounts, setGuestAccounts] = useState<{[key: string]: {name: string; password: string}}>(() => {
     try {
@@ -294,13 +296,38 @@ export default function LandingPage({ onLogin }: LandingPageProps) {
 
               <div>
                 <label className="text-[10px] font-mono uppercase tracking-widest text-white/50 block mb-1">Password</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyber-blue"
-                  placeholder="Enter your password"
-                />
+                <div className="relative">
+                  <input
+                    id="input-landing-password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 pr-12 py-3 text-sm text-white focus:outline-none focus:border-cyber-blue"
+                    placeholder="Enter your password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((s) => !s)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    aria-pressed={showPassword}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 text-white/40 hover:text-white transition-colors touch-manipulation"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <label
+                  htmlFor="checkbox-landing-show-password"
+                  className="flex items-center gap-2 mt-2 text-[11px] font-bold text-white/60 hover:text-white cursor-pointer select-none touch-manipulation"
+                >
+                  <input
+                    id="checkbox-landing-show-password"
+                    type="checkbox"
+                    checked={showPassword}
+                    onChange={(e) => setShowPassword(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 accent-cyber-blue cursor-pointer"
+                  />
+                  Show password
+                </label>
               </div>
 
               <button
@@ -363,13 +390,38 @@ export default function LandingPage({ onLogin }: LandingPageProps) {
 
                 <div>
                   <label className="text-[10px] font-mono uppercase tracking-widest text-white/50 block mb-1">Password</label>
-                  <input
-                    type="password"
-                    value={guestPassword}
-                    onChange={(e) => setGuestPassword(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyber-blue"
-                    placeholder="Enter Password"
-                  />
+                  <div className="relative">
+                    <input
+                      id="input-landing-guest-password"
+                      type={showGuestPassword ? 'text' : 'password'}
+                      value={guestPassword}
+                      onChange={(e) => setGuestPassword(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 pr-12 py-3 text-sm text-white focus:outline-none focus:border-cyber-blue"
+                      placeholder="Enter Password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowGuestPassword((s) => !s)}
+                      aria-label={showGuestPassword ? 'Hide password' : 'Show password'}
+                      aria-pressed={showGuestPassword}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 text-white/40 hover:text-white transition-colors touch-manipulation"
+                    >
+                      {showGuestPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <label
+                    htmlFor="checkbox-landing-guest-show-password"
+                    className="flex items-center gap-2 mt-2 text-[11px] font-bold text-white/60 hover:text-white cursor-pointer select-none touch-manipulation"
+                  >
+                    <input
+                      id="checkbox-landing-guest-show-password"
+                      type="checkbox"
+                      checked={showGuestPassword}
+                      onChange={(e) => setShowGuestPassword(e.target.checked)}
+                      className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 accent-cyber-blue cursor-pointer"
+                    />
+                    Show password
+                  </label>
                 </div>
               </div>
 
