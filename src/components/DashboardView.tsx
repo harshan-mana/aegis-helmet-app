@@ -126,7 +126,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
 
   // ESP32-CAM state
   const [esp32Connected, setEsp32Connected] = useState(false);
-  const [esp32StreamUrl, setEsp32StreamUrl] = useState('http://192.168.4.1:81/stream');
+  const [esp32StreamUrl, setEsp32StreamUrl] = useState('http://192.168.4.1/stream');
   const [esp32Data, setEsp32Data] = useState<{ speed: number; persons: number; plates: string[] } | null>(null);
 
   // Person detection state
@@ -340,10 +340,10 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
    * Capture the current camera frame and persist it as evidence.
    *
    * `mode`:
-   *  - 'manual'  — user pressed Capture; the image is always saved, but the
+   *  - 'manual'  â user pressed Capture; the image is always saved, but the
    *                violation verdict is still decided by the verification
    *                pipeline (never assumed).
-   *  - 'auto'    — fired by the detection loop once a candidate is CONFIRMED;
+   *  - 'auto'    â fired by the detection loop once a candidate is CONFIRMED;
    *                nothing is saved if the candidate is not confirmed, and the
    *                de-dup window stops repeated captures of one event.
    */
@@ -405,7 +405,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
           reasons: [
             top
               ? `Confidence ${(confidence * 100).toFixed(0)}% below minimum ${(minConf * 100).toFixed(0)}%`
-              : 'No active detection — manual capture',
+              : 'No active detection â manual capture',
             'Saved as UNVERIFIED candidate for human review (not a confirmed violation)',
           ],
         };
@@ -414,7 +414,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
       if (verdict) {
         candidate.reasons = [
           ...candidate.reasons,
-          `Classification: ${verdict.label} (${verdict.verified ? 'verified by trained model' : 'unverified heuristic'}) — ${verdict.basis}`,
+          `Classification: ${verdict.label} (${verdict.verified ? 'verified by trained model' : 'unverified heuristic'}) â ${verdict.basis}`,
         ];
       }
 
@@ -430,7 +430,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
           showCaptureResult({
             status: 'unverified',
             violationType: candidate.violationType,
-            reasons: ['Duplicate suppressed — same violation event captured recently'],
+            reasons: ['Duplicate suppressed â same violation event captured recently'],
           });
         }
         return;
@@ -520,7 +520,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   const [newContactName, setNewContactName] = useState('');
   const [newContactPhone, setNewContactPhone] = useState('');
 
-  // GPS tracker — high-accuracy, rapid updates
+  // GPS tracker â high-accuracy, rapid updates
   useEffect(() => {
     if (!navigator.geolocation) {
       setGpsStatus('unavailable');
@@ -643,7 +643,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
       if (!cams.length) return null;
       // Labels are ONLY populated once camera permission has been granted.
       // Before that they are empty, so any device we picked would be a blind
-      // guess — in that case fall through to the facingMode constraints,
+      // guess â in that case fall through to the facingMode constraints,
       // which are reliable for selecting the rear camera on Android Chrome.
       const labelled = cams.filter((d) => (d.label || '').length > 0);
       if (!labelled.length) return null;
@@ -725,7 +725,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
       }
     }
 
-    // A newer request superseded us — drop this result instead of applying it.
+    // A newer request superseded us â drop this result instead of applying it.
     if (gen !== cameraGenRef.current) {
       stream?.getTracks().forEach((t) => t.stop());
       return false;
@@ -768,7 +768,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     }
 
     if (!gotFrames) {
-      // The new source never produced frames — do NOT claim it is active.
+      // The new source never produced frames â do NOT claim it is active.
       stream.getTracks().forEach((t) => t.stop());
       if (streamRef.current === stream) streamRef.current = null;
       videoEl.srcObject = null;
@@ -1054,7 +1054,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
             const name = verdict ? verdict.label : toDetectedLabel(p.class, p.score).label;
             const pct = verdict ? Math.round(verdict.confidence * 100) : Math.round(p.score * 100);
             const mark = verdict && !verdict.verified && isVehicleClass(p.class) ? ' ~' : '';
-            const label = `${name}${mark} • ${pct}%`;
+            const label = `${name}${mark} â¢ ${pct}%`;
             ctx.font = 'bold 12px monospace';
             const tw = ctx.measureText(label).width;
             ctx.fillStyle = 'rgba(0,0,0,0.7)';
@@ -1177,30 +1177,51 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
           )}
         </div>
 
-        {/* 2. ESP32-CAM Connection */}
-        <div className="glass-panel p-5 border-cyber-green/20 relative overflow-hidden">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Camera className="w-5 h-5 text-cyber-green" />
-              <span className="text-[10px] font-black uppercase tracking-widest text-white/40">ESP32-CAM</span>
+        {/* 2. ESP32-CAM Connection & Live Stream */}
+        <div className="glass-panel p-5 border-cyber-green/20 relative overflow-hidden space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <Camera className="w-5 h-5 text-cyber-green shrink-0" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-white/40 truncate">ESP32-CAM Stream</span>
             </div>
             <button
               onClick={() => setEsp32Connected(!esp32Connected)}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shrink-0 ${
                 esp32Connected
                   ? 'bg-cyber-green/20 text-cyber-green border border-cyber-green/30'
-                  : 'bg-white/5 text-white/50 border border-white/10 hover:bg-white/10'
+                  : 'bg-cyber-green text-black border border-cyber-green/30'
               }`}
             >
               {esp32Connected ? 'Disconnect' : 'Connect'}
             </button>
           </div>
+
+          <div className="space-y-1.5">
+            <p className="text-[9px] text-white/40 uppercase tracking-wider">Stream URL (ESP32-CAM WiFi hotspot)</p>
+            <input
+              type="text"
+              value={esp32StreamUrl}
+              onChange={(e) => setEsp32StreamUrl(e.target.value)}
+              placeholder="http://192.168.4.1/stream"
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-cyber-green"
+            />
+          </div>
+
           {esp32Connected ? (
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-[10px] font-mono text-cyber-green">
                 <div className="w-2 h-2 rounded-full bg-cyber-green animate-pulse" />
-                <span>Live via Mobile WiFi</span>
+                <span>Streaming from {esp32StreamUrl}</span>
               </div>
+              <div className="relative w-full bg-black rounded-xl overflow-hidden border border-white/10 aspect-video flex items-center justify-center">
+                <img
+                  src={esp32StreamUrl}
+                  alt="ESP32-CAM live stream"
+                  className="w-full h-full object-contain object-center bg-black"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+              <p className="text-[9px] text-white/40">If the stream is blank, connect to the ESP32-CAM WiFi and confirm the URL (e.g. http://192.168.4.1/stream).</p>
               {esp32Data && (
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div className="bg-white/5 rounded-lg p-2">
@@ -1230,16 +1251,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
               )}
             </div>
           ) : (
-            <div className="space-y-2">
-              <p className="text-[10px] text-white/40">Connect ESP32-CAM via mobile WiFi hotspot</p>
-              <input
-                type="text"
-                value={esp32StreamUrl}
-                onChange={(e) => setEsp32StreamUrl(e.target.value)}
-                placeholder="Stream URL"
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyber-green"
-              />
-            </div>
+            <p className="text-[10px] text-white/40">Set the stream URL and tap <span className="text-white/70 font-bold">Connect</span> to view the ESP32-CAM live video.</p>
           )}
         </div>
 
@@ -1272,15 +1284,15 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                 LNG: <span className="text-white">{gpsCoords.lng.toFixed(6)}</span>
               </p>
               <p className="text-[10px] font-mono text-white/50">
-                ACC: <span className="text-cyber-green">±{gpsAccuracy}m</span> | SAT: <span className="text-cyber-purple">{satellites}</span>
+                ACC: <span className="text-cyber-green">Â±{gpsAccuracy}m</span> | SAT: <span className="text-cyber-purple">{satellites}</span>
               </p>
               <p className="text-[10px] font-mono text-white/50">
-                ALT: <span className="text-white">{gpsAltitude !== null ? `${gpsAltitude}m` : '—'}</span> | HDG: <span className="text-white">{gpsHeading !== null ? `${gpsHeading}°` : '—'}</span> | SPD: <span className="text-cyber-green">{gpsSpeed.toFixed(1)} km/h</span>
+                ALT: <span className="text-white">{gpsAltitude !== null ? `${gpsAltitude}m` : 'â'}</span> | HDG: <span className="text-white">{gpsHeading !== null ? `${gpsHeading}Â°` : 'â'}</span> | SPD: <span className="text-cyber-green">{gpsSpeed.toFixed(1)} km/h</span>
               </p>
             </div>
           )}
           {gpsSignalWeak && gpsStatus !== 'denied' && (
-            <p className="text-[9px] text-cyber-orange mt-2">GPS signal is weak — move to open sky for better accuracy.</p>
+            <p className="text-[9px] text-cyber-orange mt-2">GPS signal is weak â move to open sky for better accuracy.</p>
           )}
           {gpsStatus === 'denied' && (
             <p className="text-[9px] text-cyber-red/70 mt-2">Enable location permissions in browser settings</p>
@@ -1293,7 +1305,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Webcam Feed - Takes 2 columns */}
         <div className="lg:col-span-2 space-y-4">
-          <div className="glass-panel overflow-hidden relative aspect-video bg-black flex items-center justify-center border-white/10">
+          <div className="glass-panel overflow-hidden relative w-full bg-black flex items-center justify-center border-white/10 h-[min(72svh,calc(100vw*0.75))] sm:h-auto sm:aspect-video lg:max-h-[80vh]">
             {/* Top badges */}
             <div className="absolute top-4 left-4 z-40 flex items-center gap-2">
               <span className="px-3 py-1 bg-black/80 backdrop-blur-md border border-white/10 rounded-xl text-[9px] font-black uppercase text-cyber-blue flex items-center gap-1.5">
@@ -1314,7 +1326,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
               )}
             </div>
 
-            {/* Webcam controls — wrap within the card so they never
+            {/* Webcam controls â wrap within the card so they never
                 overflow or get clipped on narrow screens */}
             <div className="absolute top-4 right-4 z-40 flex flex-wrap items-center justify-end gap-2 max-w-[calc(100%-2rem)] sm:max-w-none">
               {!isWebcamActive ? (
@@ -1327,7 +1339,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                 </button>
               ) : (
                 <>
-                  {/* Front/Rear camera toggle — one click, one switch. A single
+                  {/* Front/Rear camera toggle â one click, one switch. A single
                       onClick (no extra touch handlers) so a tap never
                       switches twice. */}
                   <button
@@ -1387,7 +1399,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
               )}
             </div>
 
-            {/* Video element — always rendered and visible in layout. A display:none
+            {/* Video element â always rendered and visible in layout. A display:none
                 video stops delivering frames, which makes camera switching
                 report a false failure; the standby overlay below covers it
                 instead. */}
@@ -1396,12 +1408,12 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
               autoPlay
               playsInline
               muted
-              className="w-full h-full object-cover"
+              className="absolute inset-0 w-full h-full object-contain object-center"
             />
             <canvas ref={canvasRef} className="hidden" />
             <canvas
               ref={detectCanvasRef}
-              className={`absolute inset-0 w-full h-full object-cover pointer-events-none ${isWebcamActive ? 'block' : 'hidden'}`}
+              className={`absolute inset-0 w-full h-full object-contain object-center pointer-events-none ${isWebcamActive ? 'block' : 'hidden'}`}
             />
 
             {/* Detection overlay - only when active */}
@@ -1451,7 +1463,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
               <div className="space-y-1">
                 <span className="text-[9px] font-mono uppercase tracking-widest text-white/40 block">Detection Engine</span>
                 <span className="font-mono text-xs text-cyber-purple font-bold">
-                  YOLOv8n • 640x640 • 30 FPS
+                  YOLOv8n â¢ 640x640 â¢ 30 FPS
                 </span>
               </div>
               {isDetecting && (
@@ -1552,7 +1564,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                         {v.record.reviewStatus === 'approved' ? 'Reviewed' : 'Rejected'}
                       </span>
                     )}
-                    {/* actions — always visible so they work on touch */}
+                    {/* actions â always visible so they work on touch */}
                     <div className="absolute top-1 right-1 flex gap-1">
                       <button onClick={() => setViewingEvidence(v.record)} aria-label="View evidence details" title="View details"
                         className="p-1 bg-black/70 text-white rounded-lg hover:bg-black/90 touch-manipulation">
@@ -1695,7 +1707,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white mb-3 focus:outline-none focus:border-cyber-blue"
                 />
                 <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">
-                  Speed (km/h) — blank keeps captured value
+                  Speed (km/h) â blank keeps captured value
                 </label>
                 <input
                   type="number"
@@ -1786,7 +1798,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                 </div>
                 <p className="text-[9px] font-mono text-white/30 mt-3 leading-relaxed">
                   {dedicatedModelActive
-                    ? 'Trained Indian-vehicle classifier active — verified subclasses.'
+                    ? 'Trained Indian-vehicle classifier active â verified subclasses.'
                     : VEHICLE_SUBTYPE_LIMITATION}
                 </p>
               </>
@@ -1993,7 +2005,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                 {captureResult.status === 'confirmed'
                   ? `Confirmed: ${captureResult.violationType || 'Violation'}`
                   : captureResult.status === 'unverified'
-                  ? `Candidate — requires review${captureResult.violationType ? ` (${captureResult.violationType})` : ''}`
+                  ? `Candidate â requires review${captureResult.violationType ? ` (${captureResult.violationType})` : ''}`
                   : 'Capture rejected'}
               </p>
               <ul className="text-[10px] font-mono mt-1 space-y-0.5 list-disc list-inside">

@@ -19,7 +19,7 @@ interface UseESP32Return extends ESP32State {
 
 export function useESP32(): UseESP32Return {
   const [isConnected, setIsConnected] = useState(false);
-  const [streamUrl, setStreamUrl] = useState('http://192.168.4.1:81/stream');
+  const [streamUrl, setStreamUrl] = useState('http://192.168.4.1/stream');
   const [speed, setSpeed] = useState(0);
   const [persons, setPersons] = useState(0);
   const [plates, setPlates] = useState<string[]>([]);

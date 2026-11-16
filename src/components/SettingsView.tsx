@@ -54,7 +54,7 @@ export default function SettingsView() {
   const [datasetMessage, setDatasetMessage] = useState<string | null>(null);
   const [testPlateQuery, setTestPlateQuery] = useState('');
   const [testPlateResult, setTestPlateResult] = useState<RTOVehicle | null | 'NOT_FOUND'>(null);
-  const [esp32StreamUrl, setEsp32StreamUrl] = useState('http://192.168.4.1:81/stream');
+  const [esp32StreamUrl, setEsp32StreamUrl] = useState('http://192.168.4.1/stream');
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -363,7 +363,7 @@ export default function SettingsView() {
                 </span>
               </div>
               <p className="text-[10px] text-white/60 uppercase font-mono">
-                Latency: 11ms • Protocol: ESP32-Cam Stream
+                Latency: 11ms â¢ Protocol: ESP32-Cam Stream
               </p>
             </div>
           )}
@@ -763,28 +763,46 @@ export default function SettingsView() {
                     </button>
                   </div>
 
-                  {/* RTSP / MJPEG Stream bridge */}
+                  {/* ESP32-CAM live stream (MJPEG) - works when device is on the ESP32 WiFi */}
                   <div className="mb-8 p-6 bg-white/5 border border-white/10 rounded-2xl space-y-4">
                     <label className="text-xs font-bold text-white block uppercase tracking-wider">
-                      ESP32-CAM MJPEG / HTTP Video Stream URL
+                      ESP32-CAM Live Stream URL
                     </label>
-                    <div className="flex gap-3">
+                    <p className="text-[11px] text-white/50">Connect your device to the ESP32-CAM WiFi hotspot, enter the stream URL, then start the preview.</p>
+                    <div className="flex flex-col sm:flex-row gap-3">
                       <input
                         type="text"
                         value={esp32StreamUrl}
                         onChange={(e) => setEsp32StreamUrl(e.target.value)}
+                        placeholder="http://192.168.4.1/stream"
                         className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-mono focus:border-cyber-blue"
                       />
                       <button
-                        onClick={() => {
-                          setWifiStatus('connected');
-                          alert('ESP32 stream bridge target registered.');
-                        }}
-                        className="px-5 py-2.5 bg-cyber-blue text-black font-bold text-xs rounded-xl"
+                        onClick={() => setWifiStatus(wifiStatus === 'connected' ? 'disconnected' : 'connected')}
+                        className="px-5 py-2.5 bg-cyber-blue text-black font-bold text-xs rounded-xl shrink-0"
                       >
-                        Set Stream URL
+                        {wifiStatus === 'connected' ? 'Stop Stream' : 'Start Stream'}
                       </button>
                     </div>
+                    {wifiStatus === 'connected' ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 text-[10px] font-mono text-cyber-green">
+                          <div className="w-2 h-2 rounded-full bg-cyber-green animate-pulse" />
+                          <span>Live stream: {esp32StreamUrl}</span>
+                        </div>
+                        <div className="relative w-full bg-black rounded-xl overflow-hidden border border-white/10 aspect-video flex items-center justify-center">
+                          <img
+                            src={esp32StreamUrl}
+                            alt="ESP32-CAM live stream"
+                            className="w-full h-full object-contain object-center bg-black"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        <p className="text-[10px] text-white/40">If the video is blank, confirm you are connected to the ESP32-CAM WiFi and the URL is correct (e.g. http://192.168.4.1/stream).</p>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-white/40">Stream preview is stopped. Tap <span className="text-white/70 font-semibold">Start Stream</span> to view the live video here.</p>
+                    )}
                   </div>
 
                   {/* Feature 6: Only show first module - simplified */}
