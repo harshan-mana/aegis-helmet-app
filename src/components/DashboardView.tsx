@@ -340,10 +340,10 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
    * Capture the current camera frame and persist it as evidence.
    *
    * `mode`:
-   *  - 'manual'  â user pressed Capture; the image is always saved, but the
+   *  - 'manual'  Ã¢ÂÂ user pressed Capture; the image is always saved, but the
    *                violation verdict is still decided by the verification
    *                pipeline (never assumed).
-   *  - 'auto'    â fired by the detection loop once a candidate is CONFIRMED;
+   *  - 'auto'    Ã¢ÂÂ fired by the detection loop once a candidate is CONFIRMED;
    *                nothing is saved if the candidate is not confirmed, and the
    *                de-dup window stops repeated captures of one event.
    */
@@ -405,7 +405,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
           reasons: [
             top
               ? `Confidence ${(confidence * 100).toFixed(0)}% below minimum ${(minConf * 100).toFixed(0)}%`
-              : 'No active detection â manual capture',
+              : 'No active detection Ã¢ÂÂ manual capture',
             'Saved as UNVERIFIED candidate for human review (not a confirmed violation)',
           ],
         };
@@ -414,7 +414,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
       if (verdict) {
         candidate.reasons = [
           ...candidate.reasons,
-          `Classification: ${verdict.label} (${verdict.verified ? 'verified by trained model' : 'unverified heuristic'}) â ${verdict.basis}`,
+          `Classification: ${verdict.label} (${verdict.verified ? 'verified by trained model' : 'unverified heuristic'}) Ã¢ÂÂ ${verdict.basis}`,
         ];
       }
 
@@ -430,7 +430,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
           showCaptureResult({
             status: 'unverified',
             violationType: candidate.violationType,
-            reasons: ['Duplicate suppressed â same violation event captured recently'],
+            reasons: ['Duplicate suppressed Ã¢ÂÂ same violation event captured recently'],
           });
         }
         return;
@@ -520,7 +520,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
   const [newContactName, setNewContactName] = useState('');
   const [newContactPhone, setNewContactPhone] = useState('');
 
-  // GPS tracker â high-accuracy, rapid updates
+  // GPS tracker Ã¢ÂÂ high-accuracy, rapid updates
   useEffect(() => {
     if (!navigator.geolocation) {
       setGpsStatus('unavailable');
@@ -643,7 +643,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
       if (!cams.length) return null;
       // Labels are ONLY populated once camera permission has been granted.
       // Before that they are empty, so any device we picked would be a blind
-      // guess â in that case fall through to the facingMode constraints,
+      // guess Ã¢ÂÂ in that case fall through to the facingMode constraints,
       // which are reliable for selecting the rear camera on Android Chrome.
       const labelled = cams.filter((d) => (d.label || '').length > 0);
       if (!labelled.length) return null;
@@ -725,7 +725,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
       }
     }
 
-    // A newer request superseded us â drop this result instead of applying it.
+    // A newer request superseded us Ã¢ÂÂ drop this result instead of applying it.
     if (gen !== cameraGenRef.current) {
       stream?.getTracks().forEach((t) => t.stop());
       return false;
@@ -768,7 +768,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
     }
 
     if (!gotFrames) {
-      // The new source never produced frames â do NOT claim it is active.
+      // The new source never produced frames Ã¢ÂÂ do NOT claim it is active.
       stream.getTracks().forEach((t) => t.stop());
       if (streamRef.current === stream) streamRef.current = null;
       videoEl.srcObject = null;
@@ -1054,7 +1054,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
             const name = verdict ? verdict.label : toDetectedLabel(p.class, p.score).label;
             const pct = verdict ? Math.round(verdict.confidence * 100) : Math.round(p.score * 100);
             const mark = verdict && !verdict.verified && isVehicleClass(p.class) ? ' ~' : '';
-            const label = `${name}${mark} â¢ ${pct}%`;
+            const label = `${name}${mark} Ã¢ÂÂ¢ ${pct}%`;
             ctx.font = 'bold 12px monospace';
             const tw = ctx.measureText(label).width;
             ctx.fillStyle = 'rgba(0,0,0,0.7)';
@@ -1213,15 +1213,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                 <div className="w-2 h-2 rounded-full bg-cyber-green animate-pulse" />
                 <span>Streaming from {esp32StreamUrl}</span>
               </div>
-              <div className="relative w-full bg-black rounded-xl overflow-hidden border border-white/10 aspect-video flex items-center justify-center">
-                <img
-                  src={esp32StreamUrl}
-                  alt="ESP32-CAM live stream"
-                  className="w-full h-full object-contain object-center bg-black"
-                  referrerPolicy="no-referrer"
-                />
-              </div>
-              <p className="text-[9px] text-white/40">If the stream is blank, connect to the ESP32-CAM WiFi and confirm the URL (e.g. http://192.168.4.1/stream).</p>
+              <p className="text-[9px] text-white/40">Live preview is shown in the main camera view. If blank, connect to the ESP32-CAM WiFi and confirm the URL (e.g. http://192.168.4.1/stream).</p>
               {esp32Data && (
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div className="bg-white/5 rounded-lg p-2">
@@ -1284,15 +1276,15 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                 LNG: <span className="text-white">{gpsCoords.lng.toFixed(6)}</span>
               </p>
               <p className="text-[10px] font-mono text-white/50">
-                ACC: <span className="text-cyber-green">Â±{gpsAccuracy}m</span> | SAT: <span className="text-cyber-purple">{satellites}</span>
+                ACC: <span className="text-cyber-green">ÃÂ±{gpsAccuracy}m</span> | SAT: <span className="text-cyber-purple">{satellites}</span>
               </p>
               <p className="text-[10px] font-mono text-white/50">
-                ALT: <span className="text-white">{gpsAltitude !== null ? `${gpsAltitude}m` : 'â'}</span> | HDG: <span className="text-white">{gpsHeading !== null ? `${gpsHeading}Â°` : 'â'}</span> | SPD: <span className="text-cyber-green">{gpsSpeed.toFixed(1)} km/h</span>
+                ALT: <span className="text-white">{gpsAltitude !== null ? `${gpsAltitude}m` : 'Ã¢ÂÂ'}</span> | HDG: <span className="text-white">{gpsHeading !== null ? `${gpsHeading}ÃÂ°` : 'Ã¢ÂÂ'}</span> | SPD: <span className="text-cyber-green">{gpsSpeed.toFixed(1)} km/h</span>
               </p>
             </div>
           )}
           {gpsSignalWeak && gpsStatus !== 'denied' && (
-            <p className="text-[9px] text-cyber-orange mt-2">GPS signal is weak â move to open sky for better accuracy.</p>
+            <p className="text-[9px] text-cyber-orange mt-2">GPS signal is weak Ã¢ÂÂ move to open sky for better accuracy.</p>
           )}
           {gpsStatus === 'denied' && (
             <p className="text-[9px] text-cyber-red/70 mt-2">Enable location permissions in browser settings</p>
@@ -1309,8 +1301,8 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
             {/* Top badges */}
             <div className="absolute top-4 left-4 z-40 flex items-center gap-2">
               <span className="px-3 py-1 bg-black/80 backdrop-blur-md border border-white/10 rounded-xl text-[9px] font-black uppercase text-cyber-blue flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full ${isWebcamActive ? 'bg-cyber-green animate-pulse' : 'bg-white/20'}`} />
-                {isWebcamActive ? 'LIVE FEED' : 'STANDBY'}
+                <span className={`w-2 h-2 rounded-full ${(esp32Connected || isWebcamActive) ? 'bg-cyber-green animate-pulse' : 'bg-white/20'}`} />
+                {esp32Connected ? 'ESP32 LIVE' : isWebcamActive ? 'LIVE FEED' : 'STANDBY'}
               </span>
               {detectionActive && (
                 <span className="px-3 py-1 bg-black/80 backdrop-blur-md border border-cyber-purple/30 rounded-xl text-[9px] font-black uppercase text-cyber-purple flex items-center gap-1.5">
@@ -1326,7 +1318,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
               )}
             </div>
 
-            {/* Webcam controls â wrap within the card so they never
+            {/* Webcam controls Ã¢ÂÂ wrap within the card so they never
                 overflow or get clipped on narrow screens */}
             <div className="absolute top-4 right-4 z-40 flex flex-wrap items-center justify-end gap-2 max-w-[calc(100%-2rem)] sm:max-w-none">
               {!isWebcamActive ? (
@@ -1339,7 +1331,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                 </button>
               ) : (
                 <>
-                  {/* Front/Rear camera toggle â one click, one switch. A single
+                  {/* Front/Rear camera toggle Ã¢ÂÂ one click, one switch. A single
                       onClick (no extra touch handlers) so a tap never
                       switches twice. */}
                   <button
@@ -1399,63 +1391,76 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
               )}
             </div>
 
-            {/* Video element â always rendered and visible in layout. A display:none
-                video stops delivering frames, which makes camera switching
-                report a false failure; the standby overlay below covers it
-                instead. */}
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="absolute inset-0 w-full h-full object-contain object-center"
-            />
-            <canvas ref={canvasRef} className="hidden" />
-            <canvas
-              ref={detectCanvasRef}
-              className={`absolute inset-0 w-full h-full object-contain object-center pointer-events-none ${isWebcamActive ? 'block' : 'hidden'}`}
-            />
-
-            {/* Detection overlay - only when active */}
-            {isWebcamActive && detectionActive && (
-              <div className="absolute inset-0 pointer-events-none z-30">
-                <motion.div
-                  initial={{ y: '-10%' }}
-                  animate={{ y: '110%' }}
-                  transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-                  className="w-full h-1 bg-gradient-to-r from-transparent via-cyber-purple/50 to-transparent"
+            {/* When ESP32-CAM stream is connected, show it in the main video slot.
+                When not connected, fall back to the device (webcam) camera. */}
+            {esp32Connected ? (
+              <img
+                src={esp32StreamUrl}
+                alt="ESP32-CAM live stream"
+                className="absolute inset-0 w-full h-full object-contain object-center bg-black"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <>
+                {/* Video element — always rendered and visible in layout. A display:none
+                    video stops delivering frames, which makes camera switching
+                    report a false failure; the standby overlay below covers it
+                    instead. */}
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="absolute inset-0 w-full h-full object-contain object-center"
                 />
-                {detectedObjects.length > 0 && (
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                <canvas ref={canvasRef} className="hidden" />
+                <canvas
+                  ref={detectCanvasRef}
+                  className={`absolute inset-0 w-full h-full object-contain object-center pointer-events-none ${isWebcamActive ? 'block' : 'hidden'}`}
+                />
+
+                {/* Detection overlay - only when active (webcam) */}
+                {isWebcamActive && detectionActive && (
+                  <div className="absolute inset-0 pointer-events-none z-30">
                     <motion.div
-                      initial={{ opacity: 0, scale: 0.8 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="border-2 border-cyber-purple/60 rounded-lg p-4 bg-black/40 backdrop-blur-sm"
-                    >
-                      <div className="flex flex-wrap gap-2 justify-center">
-                        {[...new Set(lastVerdictsRef.current.map((v) => v.label))].map((label) => (
-                          <span key={label} className="px-2 py-1 bg-cyber-purple/20 border border-cyber-purple/40 rounded text-[10px] font-mono text-cyber-purple uppercase">
-                            {label}
-                          </span>
-                        ))}
+                      initial={{ y: '-10%' }}
+                      animate={{ y: '110%' }}
+                      transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                      className="w-full h-1 bg-gradient-to-r from-transparent via-cyber-purple/50 to-transparent"
+                    />
+                    {detectedObjects.length > 0 && (
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="border-2 border-cyber-purple/60 rounded-lg p-4 bg-black/40 backdrop-blur-sm"
+                        >
+                          <div className="flex flex-wrap gap-2 justify-center">
+                            {[...new Set(lastVerdictsRef.current.map((v) => v.label))].map((label) => (
+                              <span key={label} className="px-2 py-1 bg-cyber-purple/20 border border-cyber-purple/40 rounded text-[10px] font-mono text-cyber-purple uppercase">
+                                {label}
+                              </span>
+                            ))}
+                          </div>
+                        </motion.div>
                       </div>
-                    </motion.div>
+                    )}
                   </div>
                 )}
-              </div>
-            )}
 
-            {/* Placeholder when camera is not active */}
-            {!isWebcamActive && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black">
-                <div className="text-center p-8 z-30">
-                  <Camera className="w-16 h-16 text-white/10 mx-auto mb-4" />
-                  <h3 className="text-lg font-bold text-white/60 mb-1">Camera Standby</h3>
-                  <p className="text-xs text-white/30 max-w-sm mx-auto">
-                    {webcamError || 'Start your camera to enable YOLOv8 object detection and vehicle tracking.'}
-                  </p>
-                </div>
-              </div>
+                {/* Placeholder when device camera is not active */}
+                {!isWebcamActive && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black">
+                    <div className="text-center p-8 z-30">
+                      <Camera className="w-16 h-16 text-white/10 mx-auto mb-4" />
+                      <h3 className="text-lg font-bold text-white/60 mb-1">Camera Standby</h3>
+                      <p className="text-xs text-white/30 max-w-sm mx-auto">
+                        {webcamError || 'Start your camera to enable YOLOv8 object detection and vehicle tracking.'}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
 
             {/* Bottom info bar */}
@@ -1463,7 +1468,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
               <div className="space-y-1">
                 <span className="text-[9px] font-mono uppercase tracking-widest text-white/40 block">Detection Engine</span>
                 <span className="font-mono text-xs text-cyber-purple font-bold">
-                  YOLOv8n â¢ 640x640 â¢ 30 FPS
+                  YOLOv8n Ã¢ÂÂ¢ 640x640 Ã¢ÂÂ¢ 30 FPS
                 </span>
               </div>
               {isDetecting && (
@@ -1564,7 +1569,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                         {v.record.reviewStatus === 'approved' ? 'Reviewed' : 'Rejected'}
                       </span>
                     )}
-                    {/* actions â always visible so they work on touch */}
+                    {/* actions Ã¢ÂÂ always visible so they work on touch */}
                     <div className="absolute top-1 right-1 flex gap-1">
                       <button onClick={() => setViewingEvidence(v.record)} aria-label="View evidence details" title="View details"
                         className="p-1 bg-black/70 text-white rounded-lg hover:bg-black/90 touch-manipulation">
@@ -1707,7 +1712,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white mb-3 focus:outline-none focus:border-cyber-blue"
                 />
                 <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">
-                  Speed (km/h) â blank keeps captured value
+                  Speed (km/h) Ã¢ÂÂ blank keeps captured value
                 </label>
                 <input
                   type="number"
@@ -1798,7 +1803,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                 </div>
                 <p className="text-[9px] font-mono text-white/30 mt-3 leading-relaxed">
                   {dedicatedModelActive
-                    ? 'Trained Indian-vehicle classifier active â verified subclasses.'
+                    ? 'Trained Indian-vehicle classifier active Ã¢ÂÂ verified subclasses.'
                     : VEHICLE_SUBTYPE_LIMITATION}
                 </p>
               </>
@@ -2005,7 +2010,7 @@ export default function DashboardView({ userName, userPhoto, onViewChange, onSig
                 {captureResult.status === 'confirmed'
                   ? `Confirmed: ${captureResult.violationType || 'Violation'}`
                   : captureResult.status === 'unverified'
-                  ? `Candidate â requires review${captureResult.violationType ? ` (${captureResult.violationType})` : ''}`
+                  ? `Candidate Ã¢ÂÂ requires review${captureResult.violationType ? ` (${captureResult.violationType})` : ''}`
                   : 'Capture rejected'}
               </p>
               <ul className="text-[10px] font-mono mt-1 space-y-0.5 list-disc list-inside">
