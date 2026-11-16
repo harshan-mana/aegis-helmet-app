@@ -363,7 +363,7 @@ export default function SettingsView() {
                 </span>
               </div>
               <p className="text-[10px] text-white/60 uppercase font-mono">
-                Latency: 11ms â¢ Protocol: ESP32-Cam Stream
+                Latency: 11ms Ã¢ÂÂ¢ Protocol: ESP32-Cam Stream
               </p>
             </div>
           )}
@@ -585,7 +585,7 @@ export default function SettingsView() {
                       <div>
                         <h2 className="text-2xl font-display font-black text-white">MANUAL DATASET MANAGEMENT</h2>
                         <p className="text-[10px] font-mono text-white/40 uppercase tracking-[0.25em]">
-                          RTO Vehicle Registry • {rtoVehicleCount} Registered Nodes Active
+                          RTO Vehicle Registry â¢ {rtoVehicleCount} Registered Nodes Active
                         </p>
                       </div>
                     </div>
@@ -763,12 +763,16 @@ export default function SettingsView() {
                     </button>
                   </div>
 
-                  {/* ESP32-CAM live stream (MJPEG) - works when device is on the ESP32 WiFi */}
+                  {/* ESP32-CAM stream config (single active stream is shown in Dashboard main view) */}
                   <div className="mb-8 p-6 bg-white/5 border border-white/10 rounded-2xl space-y-4">
                     <label className="text-xs font-bold text-white block uppercase tracking-wider">
-                      ESP32-CAM Live Stream URL
+                      ESP32-CAM Live Stream (SmartHelmet_AP)
                     </label>
-                    <p className="text-[11px] text-white/50">Connect your device to the ESP32-CAM WiFi hotspot, enter the stream URL, then start the preview.</p>
+                    <div className="space-y-1 text-[11px] text-white/60">
+                      <p><span className="text-white/80 font-semibold">WiFi:</span> connect to <span className="font-mono text-white">SmartHelmet_AP</span> (password <span className="font-mono text-white">12345678</span>, 2.4&nbsp;GHz, channel&nbsp;1, max 4 devices). Some devices do not support 2.4&nbsp;GHz.</p>
+                      <p><span className="text-white/80 font-semibold">Camera:</span> stream URL <span className="font-mono text-white">http://192.168.4.1/stream</span> (host <span className="font-mono text-white">192.168.4.1</span> must be reachable).</p>
+                      <p className="text-white/40">The live MJPEG stream is rendered in the <span className="text-white/70">Dashboard main camera view</span> (single active request) to avoid buffering from duplicate connections. This panel does not open a second stream. If the app is opened over HTTPS, the browser may block the local HTTP stream (mixed content) even when WiFi is connected.</p>
+                    </div>
                     <div className="flex flex-col sm:flex-row gap-3">
                       <input
                         type="text"
@@ -777,32 +781,8 @@ export default function SettingsView() {
                         placeholder="http://192.168.4.1/stream"
                         className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-mono focus:border-cyber-blue"
                       />
-                      <button
-                        onClick={() => setWifiStatus(wifiStatus === 'connected' ? 'disconnected' : 'connected')}
-                        className="px-5 py-2.5 bg-cyber-blue text-black font-bold text-xs rounded-xl shrink-0"
-                      >
-                        {wifiStatus === 'connected' ? 'Stop Stream' : 'Start Stream'}
-                      </button>
                     </div>
-                    {wifiStatus === 'connected' ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2 text-[10px] font-mono text-cyber-green">
-                          <div className="w-2 h-2 rounded-full bg-cyber-green animate-pulse" />
-                          <span>Live stream: {esp32StreamUrl}</span>
-                        </div>
-                        <div className="relative w-full bg-black rounded-xl overflow-hidden border border-white/10 aspect-video flex items-center justify-center">
-                          <img
-                            src={esp32StreamUrl}
-                            alt="ESP32-CAM live stream"
-                            className="w-full h-full object-contain object-center bg-black"
-                            referrerPolicy="no-referrer"
-                          />
-                        </div>
-                        <p className="text-[10px] text-white/40">If the video is blank, confirm you are connected to the ESP32-CAM WiFi and the URL is correct (e.g. http://192.168.4.1/stream).</p>
-                      </div>
-                    ) : (
-                      <p className="text-[10px] text-white/40">Stream preview is stopped. Tap <span className="text-white/70 font-semibold">Start Stream</span> to view the live video here.</p>
-                    )}
+                    <p className="text-[10px] text-white/40">To view/connect the stream with status and reachability checks, use the Dashboard → ESP32-CAM card and Connect (shows in the main camera slot). A disconnected/unreachable WiFi (192.168.4.1) is reported separately from an unavailable camera stream.</p>
                   </div>
 
                   {/* Feature 6: Only show first module - simplified */}
@@ -826,7 +806,7 @@ export default function SettingsView() {
                               <Zap className="w-4 h-4 text-cyber-blue" />
                             </div>
                             <p className="text-[10px] font-mono text-white/40 uppercase">
-                              ID: {m.id} • Signal: {m.signal} dBm
+                              ID: {m.id} â¢ Signal: {m.signal} dBm
                             </p>
                           </div>
                         ))}
@@ -844,7 +824,7 @@ export default function SettingsView() {
                           HELMET BRIDGE PAIRED
                         </h3>
                         <p className="text-[10px] font-mono text-white/50 uppercase mt-1">
-                          IP: 192.168.4.1 • CAMERA SENSOR: OV2640 HD
+                          IP: 192.168.4.1 â¢ CAMERA SENSOR: OV2640 HD
                         </p>
                       </div>
                       <button
@@ -907,7 +887,7 @@ export default function SettingsView() {
                     <div>
                       <h2 className="text-2xl font-display font-black text-white">CLOUD ENGINE & PROTOCOLS</h2>
                       <p className="text-[10px] font-mono text-white/40 uppercase tracking-[0.25em]">
-                        Firebase Firestore • Gemini 2.5 Flash Server Proxy
+                        Firebase Firestore â¢ Gemini 2.5 Flash Server Proxy
                       </p>
                     </div>
                   </div>
@@ -962,7 +942,7 @@ export default function SettingsView() {
                       </p>
                     </div>
                     <div className="pt-8 text-[10px] font-black text-cyber-green uppercase tracking-widest">
-                      Active License • Perpetual
+                      Active License â¢ Perpetual
                     </div>
                   </div>
 

@@ -1,1 +1,2184 @@
-{"dv":"import React, { useRef, useState, useEffect, useCallback } from 'react';\nimport { createPortal } from 'react-dom';\nimport {\n  Gauge,\n  Activity,\n  Phone,\n  Camera,\n  CameraOff,\n  ShieldAlert,\n  Plus,\n  Trash2,\n  Heart,\n  AlertOctagon,\n  AlertTriangle,\n  User,\n  Crosshair,\n  Radio,\n  Wifi,\n  WifiOff,\n  CheckCircle,\n  X,\n  Car,\n  Signal,\n  Grid3x3,\n  Palette,\n  ChevronDown,\n  Moon,\n  Sun,\n  Sparkles,\n  Pencil,\n  Check,\n  ChevronUp,\n  LogOut,\n  Users,\n  Bell,\n  Settings,\n  LogIn,\n  BarChart3,\n  FileText,\n  Download,\n  Eye,\n  Monitor,\n  Bot,\n  Shield,\n  Database,\n  LayoutDashboard,\n} from 'lucide-react';\nimport { motion, AnimatePresence } from 'motion/react';\nimport * as Dialog from '@radix-ui/react-dialog';\nimport type * as cocoSsd from '@tensorflow-models/coco-ssd';\nimport { saveViolation, getAllViolations, deleteViolation, updateViolation, ViolationRecord } from '../utils/violationStorage';\nimport {\n  toDetectedLabel,\n  isVehicleClass,\n  VEHICLE_SUBTYPE_LIMITATION,\n  classifyVehicle,\n  loadDedicatedModel,\n  classifyRegionsWithDedicatedModel,\n  type VehicleVerdict,\n  type VehicleSubtype,\n} from '../utils/vehicleClassification';\nimport {\n  DEFAULT_VERIFICATION_CONFIG,\n  verifyCandidate,\n  VerificationTracker,\n  TWO_WHEELER_CLASSES,\n  type Box,\n} from '../utils/violationVerification';\n\ninterface EmergencyContact {\n  id: string;\n  name: string;\n  phone: string;\n  type: 'police' | 'ambulance' | 'personal' | 'fire';\n}\n\ninterface SavedContact {\n  id: string;\n  name: string;\n  phone: string;\n}\n\ninterface DetectedVehicle {\n  id: string;\n  plate: string;\n  distance: number;\n  speed: number;\n  type: string;\n}\n\nconst DEFAULT_EMERGENCY_CONTACTS: EmergencyContact[] = [\n  { id: 'police', name: 'Traffic Police', phone: '100', type: 'police' },\n  { id: 'ambulance', name: 'Ambulance', phone: '102', type: 'ambulance' },\n  { id: 'fire', name: 'Fire & Rescue', phone: '101', type: 'fire' },\n  { id: 'emergency', name: 'National Emergency', phone: '112', type: 'police' },\n];\n\nexport default function DashboardView({ userName, userPhoto, onViewChange, onSignOut, onLogin }: {\n  userName?: string;\n  userPhoto?: string;\n  onViewChange?: (view: 'dashboard' | 'violations' | 'authority' | 'profile' | 'settings') => void;\n  onSignOut?: () => void;\n  onLogin?: () => void;\n}) {\n  // Speedometer state\n  const [speedKmh, setSpeedKmh] = useState(0);\n  const [speedHistory, setSpeedHistory] = useState<number[]>([]);\n\n\n  const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {\n    gauge: Gauge, alert: AlertTriangle, layout: LayoutDashboard, chart: BarChart3,\n    file: FileText, bell: Bell, users: Users, car: Car, bot: Bot,\n    monitor: Monitor, settings: Settings, database: Database, shield: Shield,\n  };\n\n  const THEMES = [\n    { id: 'cyber', name: 'AEGIS Dark', icon: Moon, color: 'text-cyber-blue' },\n    { id: 'sunset', name: 'Orange Glow', icon: Sun, color: 'text-cyber-orange' },\n    { id: 'aurora', name: 'Midnight', icon: Sparkles, color: 'text-cyber-purple' },\n    { id: 'ocean', name: 'High Contrast', icon: Palette, color: 'text-cyber-green' },\n  ];\n\n  const AVATAR_COLORS = ['bg-pink-500', 'bg-purple-500', 'bg-blue-500', 'bg-green-500', 'bg-orange-500', 'bg-red-500', 'bg-teal-500', 'bg-indigo-500'];\n  const getAvatarColor = (name: string) => AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length];\n  const getIcon = (iconName: string) => ICON_MAP[iconName] || Gauge;\n\n  // ESP32-CAM state\n  const [esp32Connected, setEsp32Connected] = useState(false);\n  const [esp32StreamUrl, setEsp32StreamUrl] = useState('http://192.168.4.1/stream');\n  const [esp32Data, setEsp32Data] = useState<{ speed: number; persons: number; plates: string[] } | null>(null);\n  // ESP32 stream health/reconnect (single persistent <img> in main slot).\n  // Bounded exponential backoff only on actual disconnect/error; never on resize/rotate.\n  const esp32ImgRef = useRef<HTMLImageElement>(null);\n  const [esp32StreamStatus, setEsp32StreamStatus] = useState<'idle' | 'connecting' | 'live' | 'error'>('idle');\n  const [esp32StreamError, setEsp32StreamError] = useState<string | null>(null);\n  const [esp32Reachable, setEsp32Reachable] = useState<boolean | null>(null);\n  const [esp32StreamNonce, setEsp32StreamNonce] = useState(0); // cache-bust only on (re)connect\n  const esp32ReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);\n  const esp32ReconnectAttemptRef = useRef(0);\n  const esp32ReconnectInFlightRef = useRef(false);\n  const [esp32MeasuredFps, setEsp32MeasuredFps] = useState<number | null>(null);\n  const esp32FpsSamplesRef = useRef<number[]>([]);\n\n  // --- ESP32 reachability & stream reconnect (bounded, no parallel attempts) ---\n  const checkEsp32Reachable = useCallback(async (timeoutMs = 2500): Promise<boolean> => {\n    // Probe the host (not the MJPEG stream itself) to distinguish \"WiFi/AP unreachable\"\n    // from \"stream endpoint unavailable\". Uses no-cors fetch so a reachable host that\n    // doesn't answer CORS still resolves (opaque) instead of throwing.\n    const ctrl = new AbortController();\n    const timer = setTimeout(() => ctrl.abort(), timeoutMs);\n    try {\n      await fetch('http://192.168.4.1/', { mode: 'no-cors', cache: 'no-store', signal: ctrl.signal });\n      return true;\n    } catch {\n      return false;\n    } finally {\n      clearTimeout(timer);\n    }\n  }, []);\n\n  const clearEsp32Reconnect = useCallback(() => {\n    if (esp32ReconnectTimerRef.current) { clearTimeout(esp32ReconnectTimerRef.current); esp32ReconnectTimerRef.current = null; }\n    esp32ReconnectInFlightRef.current = false;\n  }, []);\n\n  const scheduleEsp32Reconnect = useCallback((reason: string) => {\n    if (!esp32Connected) return;\n    if (esp32ReconnectInFlightRef.current) return; // prevent simultaneous attempts\n    const attempt = esp32ReconnectAttemptRef.current;\n    // Bounded exponential backoff: 1s, 2s, 4s, 8s, max 15s, cap attempts at 8\n    if (attempt >= 8) {\n      setEsp32StreamStatus('error');\n      setEsp32StreamError(reason + ' (stopped retrying after several attempts)');\n      return;\n    }\n    const delay = Math.min(15000, 1000 * Math.pow(2, attempt));\n    esp32ReconnectInFlightRef.current = true;\n    esp32ReconnectAttemptRef.current = attempt + 1;\n    setEsp32StreamStatus('error');\n    setEsp32StreamError(reason + ` — retrying in ${Math.round(delay/1000)}s…`);\n    esp32ReconnectTimerRef.current = setTimeout(async () => {\n      esp32ReconnectInFlightRef.current = false;\n      if (!esp32Connected) return;\n      const ok = await checkEsp32Reachable(2500);\n      setEsp32Reachable(ok);\n      if (!ok) {\n        setEsp32StreamError('Cannot reach 192.168.4.1. Connect to WiFi \"SmartHelmet_AP\" (password 12345678, 2.4 GHz) then retry.');\n        scheduleEsp32Reconnect('ESP32 access point unreachable');\n        return;\n      }\n      // Actual reconnect: bump nonce so the single <img> requests the stream once.\n      setEsp32StreamStatus('connecting');\n      setEsp32StreamError(null);\n      setEsp32StreamNonce(n => n + 1);\n    }, delay);\n  }, [esp32Connected, checkEsp32Reachable]);\n\n  // When user connects/disconnects ESP32, (re)probe and (re)start/stop stream once.\n  useEffect(() => {\n    if (!esp32Connected) {\n      clearEsp32Reconnect();\n      esp32ReconnectAttemptRef.current = 0;\n      setEsp32StreamStatus('idle');\n      setEsp32StreamError(null);\n      setEsp32Reachable(null);\n      setEsp32MeasuredFps(null);\n      esp32FpsSamplesRef.current = [];\n      return;\n    }\n    let cancelled = false;\n    (async () => {\n      setEsp32StreamStatus('connecting');\n      setEsp32StreamError(null);\n      esp32ReconnectAttemptRef.current = 0;\n      const ok = await checkEsp32Reachable(3000);\n      if (cancelled) return;\n      setEsp32Reachable(ok);\n      if (!ok) {\n        setEsp32StreamError('Cannot reach 192.168.4.1. Join WiFi \"SmartHelmet_AP\" (password 12345678, 2.4 GHz, ch 1).');\n        scheduleEsp32Reconnect('ESP32 access point unreachable');\n        return;\n      }\n      // Start stream once (single persistent <img> picks this up).\n      setEsp32StreamNonce(n => n + 1);\n    })();\n    return () => { cancelled = true; clearEsp32Reconnect(); };\n  }, [esp32Connected, esp32StreamUrl]); // restart only when user connects or changes URL\n\n  // Cleanup on unmount\n  useEffect(() => () => { clearEsp32Reconnect(); }, [clearEsp32Reconnect]);\n\n  // Person detection state\n  const [detectedPersons, setDetectedPersons] = useState<string[]>([]);\n  const [capturedImages, setCapturedImages] = useState<string[]>([]);\n  const [evidenceViolations, setEvidenceViolations] = useState<{ id: string; url: string; label: string; record: ViolationRecord }[]>([]);\n  const [storageError, setStorageError] = useState<string | null>(null);\n\n  // Load existing evidence from IndexedDB on mount\n  useEffect(() => {\n    let cancelled = false;\n    (async () => {\n      const records = await getAllViolations();\n      if (cancelled) return;\n      const items = records.map((r) => ({ id: r.id, url: URL.createObjectURL(r.blob), label: r.type, record: r }));\n      setEvidenceViolations(items);\n    })();\n    return () => { cancelled = true; };\n  }, []);\n\n  // GPS state\n  const [gpsStatus, setGpsStatus] = useState<'searching' | 'locked' | 'denied' | 'unavailable'>('searching');\n  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);\n  const [satellites, setSatellites] = useState(0);\n  const [gpsAccuracy, setGpsAccuracy] = useState(0);\n  const [gpsAltitude, setGpsAltitude] = useState<number | null>(null);\n  const [gpsHeading, setGpsHeading] = useState<number | null>(null);\n  const [gpsSpeed, setGpsSpeed] = useState(0);\n  const [gpsSignalWeak, setGpsSignalWeak] = useState(false);\n  const lastGpsFixAtRef = useRef(0);\n  const lastPosRef = useRef<{ lat: number; lng: number; t: number } | null>(null);\n\n  // Webcam state\n  const videoRef = useRef<HTMLVideoElement>(null);\n  const canvasRef = useRef<HTMLCanvasElement>(null);\n  const streamRef = useRef<MediaStream | null>(null);\n  const [isWebcamActive, setIsWebcamActive] = useState(false);\n  const [webcamError, setWebcamError] = useState<string | null>(null);\n  const [detectionActive, setDetectionActive] = useState(false);\n  const [detectedObjects, setDetectedObjects] = useState<string[]>([]);\n  const [isDetecting, setIsDetecting] = useState(false);\n  const [detectionConfidence, setDetectionConfidence] = useState(0);\n  const detectCanvasRef = useRef<HTMLCanvasElement>(null);\n  const modelRef = useRef<cocoSsd.ObjectDetection | null>(null);\n  const [modelReady, setModelReady] = useState(false);\n  const [modelError, setModelError] = useState<string | null>(null);\n  const lastPredictionsRef = useRef<cocoSsd.DetectedObject[]>([]);\n  const lastClassesRef = useRef<string>('');\n  const lastInferRef = useRef(0);\n  // Throttles the automatic-capture candidate check (ms since last frame).\n  const lastAutoCaptureCheckRef = useRef(0);\n  // Latest live values, so the capture path never reads a stale render\n  // (the detection loop intentionally keeps a stable effect closure).\n  const liveCaptureCtxRef = useRef({\n    speedKmh: 0,\n    gpsStatus: 'searching' as 'searching' | 'locked' | 'denied' | 'unavailable',\n    gpsCoords: null as { lat: number; lng: number } | null,\n    detectedObjects: [] as string[],\n  });\n  liveCaptureCtxRef.current = { speedKmh, gpsStatus, gpsCoords, detectedObjects };\n\n  // Indian-vehicle classification:\n  //  - dedicatedModelRef holds trained weights if they exist at\n  //    models/indian_vehicle/model.json (verified subclass).\n  //  - lastVerdictsRef holds the latest per-detection verdicts.\n  // Both are non-blocking: with no weights the app keeps using COCO-SSD.\n  const dedicatedModelRef = useRef<import('../utils/vehicleClassification').DedicatedVehicleModel | null>(null);\n  const [dedicatedModelActive, setDedicatedModelActive] = useState(false);\n  const lastVerdictsRef = useRef<VehicleVerdict[]>([]);\n  const dedicatedResultsRef = useRef<Array<{ subtype: VehicleSubtype; score: number } | null>>([]);\n  const lastDedicatedInferRef = useRef(0);\n  const rafRef = useRef(0);\n  // Try to load trained Indian-vehicle weights in the background.\n  // Absent weights are the normal case: we simply keep using COCO-SSD.\n  useEffect(() => {\n    let cancelled = false;\n    (async () => {\n      const m = await loadDedicatedModel();\n      if (cancelled) return;\n      dedicatedModelRef.current = m;\n      setDedicatedModelActive(!!m);\n    })();\n    return () => { cancelled = true; };\n  }, []);\n\n  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');\n  // Desired camera (single source of truth). The UI and the acquisition logic\n  // both read from here, so they can never disagree.\n  const facingModeRef = useRef<'user' | 'environment'>('environment');\n  // Mutex: only one camera operation runs at a time.\n  const switchBusyRef = useRef(false);\n  // A click that arrived while a switch was in flight.\n  const switchPendingRef = useRef(false);\n  // Generation token: a slow response from an older request is discarded\n  // instead of overwriting a newer selection.\n  const cameraGenRef = useRef(0);\n  // Last camera that actually produced frames, used to restore on failure.\n  const lastGoodRef = useRef<{ facing: 'user' | 'environment'; deviceId: string | null } | null>(null);\n  // Read by the detection loop so it pauses while the source is switching.\n  const cameraSwitchingRef = useRef(false);\n  const [switchingCamera, setSwitchingCamera] = useState(false);\n  facingModeRef.current = facingMode;\n\n  // Violation verification (cross-checking pipeline).\n  // Single source of truth for candidate evaluation + temporal\n  // consistency + de-dup. Configurable thresholds live in\n  // violationVerification.ts (DEFAULT_VERIFICATION_CONFIG).\n  const verificationRef = useRef(new VerificationTracker(DEFAULT_VERIFICATION_CONFIG));\n  const [captureResult, setCaptureResult] = useState<{\n    status: 'confirmed' | 'unverified' | 'rejected';\n    violationType: string | null;\n    reasons: string[];\n  } | null>(null);\n  const captureResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);\n  // Guards against overlapping manual + automatic captures writing twice.\n  const autoCaptureInFlightRef = useRef(false);\n\n  // Evidence management: view details, edit metadata, human review, delete.\n  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);\n  const [viewingEvidence, setViewingEvidence] = useState<ViolationRecord | null>(null);\n  const [editingEvidence, setEditingEvidence] = useState<{\n    id: string;\n    type: string;\n    verificationStatus: 'confirmed' | 'unverified';\n    speed: string;\n    objects: string;\n    reviewStatus: 'pending' | 'approved' | 'rejected';\n    reviewNote: string;\n  } | null>(null);\n\n  /** Patch one record inside the gallery state (keeps UI + IndexedDB in sync). */\n  const patchEvidenceInState = (id: string, patch: Partial<ViolationRecord>) => {\n    setEvidenceViolations(prev =>\n      prev.map((x) =>\n        x.id === id\n          ? { ...x, label: patch.type ?? x.label, record: { ...x.record, ...patch } }\n          : x\n      )\n    );\n    // Keep the open \"view details\" modal in sync with the edit.\n    setViewingEvidence(prev => (prev && prev.id === id ? { ...prev, ...patch } : prev));\n  };\n\n  const downloadEvidence = (v: { id: string; url: string; record: ViolationRecord }) => {\n    // Prefer the stored Blob so the download still works even if the\n    // cached object URL was revoked; fall back to the object URL.\n    const href = v.record.blob ? URL.createObjectURL(v.record.blob) : v.url;\n    const a = document.createElement('a');\n    a.href = href;\n    a.download = `aegis-evidence-${v.record.createdAt}-${v.id}.jpg`;\n    document.body.appendChild(a);\n    a.click();\n    document.body.removeChild(a);\n    if (v.record.blob) setTimeout(() => URL.revokeObjectURL(href), 2000);\n  };\n\n  /** Cached object URL for a stored record, or undefined if it is gone. */\n  const evidenceUrlFor = (id: string) => evidenceViolations.find((x) => x.id === id)?.url;\n\n  const openEditEvidence = (record: ViolationRecord) => {\n    setEditingEvidence({\n      id: record.id,\n      type: record.type,\n      verificationStatus: record.verificationStatus || 'unverified',\n      speed: record.speed != null ? String(record.speed) : '',\n      objects: record.objects || '',\n      reviewStatus: record.reviewStatus || 'pending',\n      reviewNote: record.reviewNote || '',\n    });\n  };\n\n  const saveEvidenceEdit = async () => {\n    if (!editingEvidence) return;\n    const trimmedSpeed = editingEvidence.speed.trim();\n    const parsedSpeed = Number(trimmedSpeed);\n    const speedValid = trimmedSpeed !== '' && Number.isFinite(parsedSpeed);\n    // Only include speed when the user entered a valid number, so a blank\n    // field never erases the originally captured measurement.\n    const updates: Partial<ViolationRecord> = {\n      type: editingEvidence.type,\n      verificationStatus: editingEvidence.verificationStatus,\n      objects: editingEvidence.objects,\n      reviewStatus: editingEvidence.reviewStatus,\n      reviewNote: editingEvidence.reviewNote,\n    };\n    if (speedValid) updates.speed = parsedSpeed;\n\n    const ok = await updateViolation(editingEvidence.id, updates);\n    if (ok) {\n      patchEvidenceInState(editingEvidence.id, updates);\n    } else {\n      setStorageError('Could not update evidence metadata.');\n    }\n    setEditingEvidence(null);\n  };\n\n  /** Evidence for a detection, shown in the capture toast. */\n  type CaptureCandidate = {\n    status: 'confirmed' | 'unverified' | 'rejected';\n    violationType: string | null;\n    reasons: string[];\n  };\n\n  const showCaptureResult = (result: CaptureCandidate, ms = 6000) => {\n    setCaptureResult(result);\n    if (captureResultTimerRef.current) clearTimeout(captureResultTimerRef.current);\n    captureResultTimerRef.current = setTimeout(() => setCaptureResult(null), ms);\n  };\n\n  /**\n   * Capture the current camera frame and persist it as evidence.\n   *\n   * `mode`:\n   *  - 'manual'  ÃÂ¢ÃÂÃÂ user pressed Capture; the image is always saved, but the\n   *                violation verdict is still decided by the verification\n   *                pipeline (never assumed).\n   *  - 'auto'    ÃÂ¢ÃÂÃÂ fired by the detection loop once a candidate is CONFIRMED;\n   *                nothing is saved if the candidate is not confirmed, and the\n   *                de-dup window stops repeated captures of one event.\n   */\n  const captureEvidence = async (mode: 'manual' | 'auto' = 'manual') => {\n    if (autoCaptureInFlightRef.current) return; // never overlap captures\n    if (!videoRef.current || !canvasRef.current) return;\n    const canvas = canvasRef.current;\n    const ctx = canvas.getContext('2d');\n    if (!ctx) return;\n\n    autoCaptureInFlightRef.current = true;\n    try {\n      canvas.width = videoRef.current.videoWidth || 640;\n      canvas.height = videoRef.current.videoHeight || 360;\n      ctx.drawImage(videoRef.current, 0, 0);\n      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);\n\n      const now = Date.now();\n      const live = liveCaptureCtxRef.current;\n      const top = lastPredictionsRef.current\n        .slice()\n        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0];\n      const rawClass = top?.class || 'manual_capture';\n      const confidence = top?.score ?? 0;\n      const topIndex = top ? lastPredictionsRef.current.indexOf(top) : -1;\n      const verdict = topIndex >= 0 ? lastVerdictsRef.current[topIndex] ?? null : null;\n      const classified = verdict ? verdict.subtype : 'other';\n      const streak = verificationRef.current.streakFor(rawClass);\n      const minConf = DEFAULT_VERIFICATION_CONFIG.minDetectionConfidence;\n\n      // TRIPLE_RIDING context: this two-wheeler's box + every person box.\n      let candidate: CaptureCandidate;\n      if (top && confidence >= minConf) {\n        const personBoxes: Box[] = lastPredictionsRef.current\n          .filter((p) => p.class === 'person')\n          .map((p) => ({ x: p.bbox[0], y: p.bbox[1], width: p.bbox[2], height: p.bbox[3] }));\n        const twoWheelerBox: Box = {\n          x: top.bbox[0],\n          y: top.bbox[1],\n          width: top.bbox[2],\n          height: top.bbox[3],\n        };\n        candidate = verifyCandidate(DEFAULT_VERIFICATION_CONFIG, {\n          detectedClass: rawClass,\n          confidence,\n          speedKmh: live.speedKmh,\n          hasGpsFix: live.gpsStatus === 'locked',\n          isVehicle: isVehicleClass(rawClass),\n          frameStreak: streak,\n          now,\n          tripleRiding: TWO_WHEELER_CLASSES.includes(rawClass)\n            ? { twoWheeler: twoWheelerBox, persons: personBoxes }\n            : null,\n        });\n      } else {\n        candidate = {\n          status: 'unverified',\n          violationType: null,\n          reasons: [\n            top\n              ? `Confidence ${(confidence * 100).toFixed(0)}% below minimum ${(minConf * 100).toFixed(0)}%`\n              : 'No active detection ÃÂ¢ÃÂÃÂ manual capture',\n            'Saved as UNVERIFIED candidate for human review (not a confirmed violation)',\n          ],\n        };\n      }\n\n      if (verdict) {\n        candidate.reasons = [\n          ...candidate.reasons,\n          `Classification: ${verdict.label} (${verdict.verified ? 'verified by trained model' : 'unverified heuristic'}) ÃÂ¢ÃÂÃÂ ${verdict.basis}`,\n        ];\n      }\n\n      // Automatic capture only fires for a CONFIRMED violation.\n      if (mode === 'auto' && candidate.status !== 'confirmed') return;\n\n      // De-dup: one record per continuing violation event.\n      if (\n        candidate.violationType &&\n        verificationRef.current.isDuplicate(candidate.violationType, now)\n      ) {\n        if (mode === 'manual') {\n          showCaptureResult({\n            status: 'unverified',\n            violationType: candidate.violationType,\n            reasons: ['Duplicate suppressed ÃÂ¢ÃÂÃÂ same violation event captured recently'],\n          });\n        }\n        return;\n      }\n\n      if (mode === 'manual') setCapturedImages(prev => [...prev, dataUrl]);\n\n      try {\n        const resp = await fetch(dataUrl);\n        const blob = await resp.blob();\n        const id = `${now}_${Math.floor(Math.random() * 1e6)}`;\n        const record: ViolationRecord = {\n          id,\n          type: candidate.violationType || rawClass,\n          createdAt: now,\n          speed: speedKmh,\n          objects: live.detectedObjects.join(', '),\n          confidence: Math.round(confidence * 100),\n          lat: live.gpsCoords?.lat ?? null,\n          lng: live.gpsCoords?.lng ?? null,\n          blob,\n          verificationStatus: candidate.status === 'confirmed' ? 'confirmed' : 'unverified',\n          reasons: candidate.reasons,\n          vehicleClass: classified,\n        };\n        const ok = await saveViolation(record);\n        if (!ok) {\n          setStorageError('Evidence could not be saved locally.');\n          return;\n        }\n        if (candidate.violationType) {\n          verificationRef.current.markSaved(candidate.violationType, now);\n        }\n        setEvidenceViolations(prev => [\n          { id, url: URL.createObjectURL(blob), label: record.type, record },\n          ...prev,\n        ]);\n        showCaptureResult(\n          {\n            status: candidate.status === 'confirmed' ? 'confirmed' : 'unverified',\n            violationType: candidate.violationType,\n            reasons: candidate.reasons,\n          },\n          mode === 'auto' ? 5000 : 6000\n        );\n      } catch (e) {\n        console.error('Violation save failed:', e);\n        setStorageError('Evidence could not be saved locally.');\n      }\n    } finally {\n      autoCaptureInFlightRef.current = false;\n    }\n  };\n\n  const confirmDeleteEvidence = async (id: string) => {\n    const ok = await deleteViolation(id);\n    if (ok) {\n      setEvidenceViolations(prev => {\n        const target = prev.find((x) => x.id === id);\n        if (target) URL.revokeObjectURL(target.url);\n        return prev.filter((x) => x.id !== id);\n      });\n    } else {\n      setStorageError('Could not delete evidence.');\n    }\n    setConfirmDeleteId(null);\n  };\n\n  // Feature 1: Detected vehicles with license plates\n  const [detectedVehicles, setDetectedVehicles] = useState<DetectedVehicle[]>([]);\n\n  // Feature 7: Tracking state\n  const [isTracking, setIsTracking] = useState(false);\n  const [wifiRange, setWifiRange] = useState(0);\n  const [trackingData, setTrackingData] = useState<{ lat: number; lng: number; speed: number; timestamp: number }[]>([]);\n\n  // Emergency contacts state\n  const [savedContacts, setSavedContacts] = useState<SavedContact[]>(() => {\n    try {\n      const saved = localStorage.getItem('aegis_emergency_contacts');\n      return saved ? JSON.parse(saved) : [];\n    } catch {\n      return [];\n    }\n  });\n  const [isAddContactOpen, setIsAddContactOpen] = useState(false);\n  const [newContactName, setNewContactName] = useState('');\n  const [newContactPhone, setNewContactPhone] = useState('');\n\n  // GPS tracker ÃÂ¢ÃÂÃÂ high-accuracy, rapid updates\n  useEffect(() => {\n    if (!navigator.geolocation) {\n      setGpsStatus('unavailable');\n      return;\n    }\n\n    let watchId: number;\n\n    const toRad = (d: number) => (d * Math.PI) / 180;\n    const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {\n      const R = 6371000;\n      const dLat = toRad(b.lat - a.lat);\n      const dLng = toRad(b.lng - a.lng);\n      const lat1 = toRad(a.lat);\n      const lat2 = toRad(b.lat);\n      const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;\n      return 2 * R * Math.asin(Math.sqrt(h));\n    };\n\n    const startGPS = () => {\n      setGpsStatus('searching');\n      watchId = navigator.geolocation.watchPosition(\n        (pos) => {\n          const coords: any = pos.coords;\n          const lat = coords.latitude;\n          const lng = coords.longitude;\n          const acc = typeof coords.accuracy === 'number' ? parseFloat(coords.accuracy.toFixed(1)) : 0;\n          const alt = typeof coords.altitude === 'number' && !isNaN(coords.altitude) ? parseFloat(coords.altitude.toFixed(1)) : null;\n          const heading = typeof coords.heading === 'number' && !isNaN(coords.heading) ? Math.round(coords.heading) : null;\n\n          lastGpsFixAtRef.current = Date.now();\n          setGpsCoords({ lat, lng });\n          setGpsAccuracy(acc);\n          setGpsAltitude(alt);\n          setGpsHeading(heading);\n          setGpsSignalWeak(acc > 30 || (typeof pos.coords.accuracy !== 'number' && acc === 0));\n\n          // Native speed in m/s, with a distance/time fallback when the device doesn't supply it\n          let speedMps = typeof coords.speed === 'number' && !isNaN(coords.speed) && coords.speed >= 0 ? coords.speed : null;\n          if (speedMps === null && lastPosRef.current) {\n            const dt = Math.max(0.001, (pos.timestamp - lastPosRef.current.t) / 1000);\n            speedMps = haversine(lastPosRef.current, { lat, lng }) / dt;\n          }\n          let speedKmhVal = speedMps !== null ? Math.max(0, parseFloat((speedMps * 3.6).toFixed(1))) : 0;\n          // Stationary filter: sub-jitter speeds (e.g. GPS drift while parked) become zero\n          if (speedKmhVal < 1.5) speedKmhVal = 0;\n          // Reject physically small position jumps that can't be real movement\n          if (speedMps !== null && speedKmhVal === 0 && lastPosRef.current) {\n            const dt = Math.max(0.001, (pos.timestamp - lastPosRef.current.t) / 1000);\n            const jumpM = haversine(lastPosRef.current, { lat, lng });\n            if (jumpM / dt * 3.6 < 1.5) speedKmhVal = 0;\n          }\n          setGpsSpeed(speedKmhVal);\n          setSpeedKmh(speedKmhVal);\n          setSpeedHistory((h) => [...h.slice(-29), speedKmhVal]);\n\n          lastPosRef.current = { lat, lng, t: pos.timestamp };\n          setSatellites(Math.floor(Math.random() * 4) + 8);\n          setGpsStatus('locked');\n        },\n        (err) => {\n          if (err.code === err.PERMISSION_DENIED) {\n            setGpsStatus('denied');\n            setGpsSpeed(0); setSpeedKmh(0);\n          } else if (err.code === err.TIMEOUT) {\n            setGpsSignalWeak(true);\n            setGpsStatus('searching');\n            setGpsSpeed(0); setSpeedKmh(0);\n          } else {\n            setGpsSignalWeak(true);\n            setGpsStatus('unavailable');\n            setGpsSpeed(0); setSpeedKmh(0);\n          }\n        },\n        { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }\n      );\n    };\n\n    startGPS();\n    return () => {\n      if (watchId !== undefined) navigator.geolocation.clearWatch(watchId);\n    };\n  }, []);\n\n  // Feature 7: Tracking with wifi range data\n  useEffect(() => {\n    if (!isTracking || !isWebcamActive) return;\n\n    const interval = setInterval(() => {\n      setWifiRange(Math.floor(Math.random() * 100) + 1);\n      if (gpsCoords) {\n        setTrackingData((prev) => [\n          ...prev.slice(-50),\n          {\n            lat: gpsCoords.lat + (Math.random() - 0.5) * 0.001,\n            lng: gpsCoords.lng + (Math.random() - 0.5) * 0.001,\n            speed: speedKmh,\n            timestamp: Date.now(),\n          },\n        ]);\n      }\n    }, 1000);\n    return () => clearInterval(interval);\n  }, [isTracking, isWebcamActive, gpsCoords, speedKmh]);\n\n  // ---------------------------------------------------------------------------\n// Camera acquisition / front-rear switching\n// ---------------------------------------------------------------------------\n\n  /** Pick the concrete videoinput deviceId for a facing mode.\n   *  `facingMode` alone is unreliable on Android Chrome (an `ideal` hint is\n   *  often ignored and the front camera is returned), so we resolve a real\n   *  deviceId from enumerateDevices() and request that device exactly.\n   *  Labels are only populated once camera permission has been granted.\n   */\n  const pickDeviceId = async (desired: 'user' | 'environment'): Promise<string | null> => {\n    try {\n      const devices = await navigator.mediaDevices.enumerateDevices();\n      const cams = devices.filter((d) => d.kind === 'videoinput' && d.deviceId);\n      if (!cams.length) return null;\n      // Labels are ONLY populated once camera permission has been granted.\n      // Before that they are empty, so any device we picked would be a blind\n      // guess ÃÂ¢ÃÂÃÂ in that case fall through to the facingMode constraints,\n      // which are reliable for selecting the rear camera on Android Chrome.\n      const labelled = cams.filter((d) => (d.label || '').length > 0);\n      if (!labelled.length) return null;\n      const rearRe = /back|rear|environment|world/i;\n      const frontRe = /front|user|face|selfie/i;\n      const wantRear = desired === 'environment';\n      const match = labelled.find((d) => (wantRear ? rearRe : frontRe).test(d.label || ''));\n      return match?.deviceId ?? null;\n    } catch {\n      return null;\n    }\n  };\n\n  /** True once the element is actually receiving frames from the new source. */\n  const waitForVideoFrames = (el: HTMLVideoElement, timeoutMs = 3000): Promise<boolean> =>\n    new Promise((resolve) => {\n      if (el.readyState >= 2 && el.videoWidth > 0) return resolve(true);\n      let settled = false;\n      const finish = (ok: boolean) => {\n        if (settled) return;\n        settled = true;\n        el.removeEventListener('loadeddata', onReady);\n        el.removeEventListener('canplay', onReady);\n        el.removeEventListener('resize', onReady);\n        clearTimeout(timer);\n        resolve(ok);\n      };\n      const onReady = () => {\n        if (el.readyState >= 2 && el.videoWidth > 0) finish(true);\n      };\n      el.addEventListener('loadeddata', onReady);\n      el.addEventListener('canplay', onReady);\n      el.addEventListener('resize', onReady);\n      const timer = setTimeout(() => finish(el.readyState >= 2 && el.videoWidth > 0), timeoutMs);\n    });\n\n  /** Acquire the requested camera and only report success once frames flow. */\n  const performCameraAcquire = async (desired: 'user' | 'environment'): Promise<boolean> => {\n    const videoEl = videoRef.current;\n    if (!videoEl) return false;\n    if (!navigator.mediaDevices?.getUserMedia) {\n      setWebcamError('Camera is not supported in this browser.');\n      setIsWebcamActive(false);\n      return false;\n    }\n\n    const gen = ++cameraGenRef.current;\n    cameraSwitchingRef.current = true;\n    setSwitchingCamera(true);\n\n    // Release the previous stream (browsers usually allow only one camera).\n    if (streamRef.current) {\n      streamRef.current.getTracks().forEach((t) => t.stop());\n      streamRef.current = null;\n    }\n    videoEl.srcObject = null;\n\n    const deviceId = await pickDeviceId(desired);\n    const attempts: MediaStreamConstraints[] = [];\n    if (deviceId) {\n      attempts.push({\n        video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },\n        audio: false,\n      });\n    }\n    attempts.push({ video: { facingMode: { exact: desired }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });\n    attempts.push({ video: { facingMode: { ideal: desired } }, audio: false });\n    attempts.push({ video: true, audio: false });\n\n    let stream: MediaStream | null = null;\n    let lastErr: any = null;\n    for (const constraints of attempts) {\n      try {\n        stream = await navigator.mediaDevices.getUserMedia(constraints);\n        break;\n      } catch (err: any) {\n        lastErr = err;\n        if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') break;\n      }\n    }\n\n    // A newer request superseded us ÃÂ¢ÃÂÃÂ drop this result instead of applying it.\n    if (gen !== cameraGenRef.current) {\n      stream?.getTracks().forEach((t) => t.stop());\n      return false;\n    }\n\n    if (!stream) {\n      const name = lastErr?.name;\n      if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {\n        setWebcamError('Camera permission denied. Please allow camera access in your browser settings.');\n      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {\n        setWebcamError('No camera device detected on this device.');\n      } else {\n        setWebcamError(lastErr?.message || 'Camera access failed.');\n      }\n      setIsWebcamActive(false);\n      cameraSwitchingRef.current = false;\n      setSwitchingCamera(false);\n      return false;\n    }\n\n    streamRef.current = stream;\n    videoEl.srcObject = stream;\n    videoEl.muted = true;\n    try {\n      await videoEl.play();\n    } catch {\n      videoEl.muted = true;\n      try {\n        await videoEl.play();\n      } catch {\n        /* verified below via frame delivery */\n      }\n    }\n\n    const gotFrames = await waitForVideoFrames(videoEl);\n\n    if (gen !== cameraGenRef.current) {\n      stream.getTracks().forEach((t) => t.stop());\n      return false;\n    }\n\n    if (!gotFrames) {\n      // The new source never produced frames ÃÂ¢ÃÂÃÂ do NOT claim it is active.\n      stream.getTracks().forEach((t) => t.stop());\n      if (streamRef.current === stream) streamRef.current = null;\n      videoEl.srcObject = null;\n      setIsWebcamActive(false);\n      return false;\n    }\n\n    const track = stream.getVideoTracks()[0];\n    const settings = track?.getSettings?.() ?? {};\n    lastGoodRef.current = {\n      facing: desired,\n      deviceId: settings.deviceId ?? deviceId ?? null,\n    };\n\n    setWebcamError(null);\n    setFacingMode(desired);\n    setIsWebcamActive(true);\n    setIsTracking(true);\n    setDetectionActive(true);\n    cameraSwitchingRef.current = false;\n    setSwitchingCamera(false);\n    return true;\n  };\n\n  /**\n   * Public entry point used by Start Camera and the front/rear button.\n   * Exactly one click == exactly one switch. Rapid clicks coalesce instead of\n   * corrupting the stream, and a failed switch restores the last good camera.\n   */\n  const startWebcam = useCallback(async (mode?: 'user' | 'environment') => {\n    if (mode) facingModeRef.current = mode;\n    // Reflect the user's intent immediately in the button.\n    setFacingMode(facingModeRef.current);\n\n    if (switchBusyRef.current) {\n      switchPendingRef.current = true;\n      return;\n    }\n    switchBusyRef.current = true;\n    try {\n      let guard = 0;\n      do {\n        switchPendingRef.current = false;\n        const desired = facingModeRef.current;\n        const ok = await performCameraAcquire(desired);\n        // If the requested camera could not be opened, restore the last\n        // working one so the user is never left with no feed.\n        if (!ok) {\n          const good = lastGoodRef.current;\n          if (good && good.facing !== desired && guard < 2) {\n            facingModeRef.current = good.facing;\n            setFacingMode(good.facing);\n            guard++;\n            continue;\n          }\n          setWebcamError(\n            desired === 'environment'\n              ? 'Rear camera is not available on this device.'\n              : 'Front camera could not be opened.'\n          );\n        }\n        guard++;\n      } while (switchPendingRef.current && guard < 4);\n    } finally {\n      switchBusyRef.current = false;\n      switchPendingRef.current = false;\n      cameraSwitchingRef.current = false;\n      setSwitchingCamera(false);\n    }\n  }, []);\n\n  // Auto-start the camera once on mount only. The dependency list is\n  // intentionally empty: this must never re-run and fight the front/rear\n  // toggle with a second competing restart.\n  useEffect(() => {\n    const timer = setTimeout(() => {\n      startWebcam();\n    }, 500);\n    return () => clearTimeout(timer);\n    // eslint-disable-next-line react-hooks/exhaustive-deps\n  }, []);\n\n  // Clean up the camera and invalidate any pending switch on unmount.\n  useEffect(() => {\n    return () => {\n      cameraGenRef.current++; // invalidate in-flight responses\n      streamRef.current?.getTracks().forEach((t) => t.stop());\n      streamRef.current = null;\n      if (videoRef.current) videoRef.current.srcObject = null;\n    };\n  }, []);\n\n  const stopWebcam = useCallback(() => {\n    if (streamRef.current) {\n      streamRef.current.getTracks().forEach((track) => track.stop());\n      streamRef.current = null;\n    }\n    if (videoRef.current) {\n      videoRef.current.srcObject = null;\n    }\n    // Cancel any in-flight switch so a late response cannot resurrect the feed.\n    cameraGenRef.current++;\n    cameraSwitchingRef.current = false;\n    switchPendingRef.current = false;\n    setSwitchingCamera(false);\n    setIsWebcamActive(false);\n    setDetectionActive(false);\n    setDetectedObjects([]);\n    setIsTracking(false);\n    setTrackingData([]);\n  }, []);\n\n  // Load COCO-SSD model once\n  useEffect(() => {\n    let cancelled = false;\n    (async () => {\n      try {\n        const tf = await import('@tensorflow/tfjs');\n        await tf.ready();\n        const cocoSsd = await import('@tensorflow-models/coco-ssd');\n        const m = await cocoSsd.load();\n        if (!cancelled) {\n          modelRef.current = m;\n          setModelReady(true);\n        }\n      } catch {\n        if (!cancelled) setModelError('Object detection model failed to load.');\n      }\n    })();\n    return () => { cancelled = true; };\n  }, []);\n\n  // Stop camera cleanup for detection canvas\n  useEffect(() => {\n    if (!isWebcamActive) {\n      const c = detectCanvasRef.current;\n      const ctx = c?.getContext('2d');\n      if (c && ctx) ctx.clearRect(0, 0, c.width, c.height);\n      lastPredictionsRef.current = [];\n    }\n  }, [isWebcamActive]);\n\n  // Real COCO-SSD detection loop (approx. 4 detections/sec; video stays smooth)\n  useEffect(() => {\n    if (!detectionActive || !isWebcamActive || !modelReady) return;\n    let active = true;\n\n    const loop = async (t: number) => {\n      if (!active) return;\n      rafRef.current = requestAnimationFrame(loop);\n      // Pause inference while the camera source is being replaced, so boxes\n      // are never computed against the outgoing feed.\n      if (cameraSwitchingRef.current) return;\n      const v = videoRef.current;\n      const c = detectCanvasRef.current;\n      if (!v || !c || !modelRef.current) return;\n      if (v.readyState >= 2 && v.videoWidth > 0) {\n        if (t - lastInferRef.current >= 250) {\n          lastInferRef.current = t;\n          setIsDetecting(true);\n          try {\n            const preds = await modelRef.current.detect(v);\n            const filtered = preds.filter((p) => p.score >= 0.5);\n            lastPredictionsRef.current = filtered;\n            verificationRef.current.updateFrame(filtered.map((p) => p.class));\n\n            // --- Indian vehicle classification -----------------------------\n            // Trained weights (if present) resolve the true subclass on the\n            // cropped region; otherwise COCO-SSD + measured geometry gives an\n            // explicitly-unverified estimate. Never blocks the detector.\n            const frameWidth = v.videoWidth || 1;\n            const frameHeight = v.videoHeight || 1;\n            const MAX_DEDICATED_BOXES = 4;\n            if (dedicatedModelRef.current && filtered.length && t - lastDedicatedInferRef.current >= 1000) {\n              lastDedicatedInferRef.current = t;\n              const boxes = filtered.slice(0, MAX_DEDICATED_BOXES).map((p) => ({\n                x: p.bbox[0],\n                y: p.bbox[1],\n                width: p.bbox[2],\n                height: p.bbox[3],\n              }));\n              try {\n                dedicatedResultsRef.current = await classifyRegionsWithDedicatedModel(dedicatedModelRef.current, v, boxes);\n              } catch {\n                dedicatedResultsRef.current = [];\n              }\n            } else if (!dedicatedModelRef.current) {\n              dedicatedResultsRef.current = [];\n            }\n            lastVerdictsRef.current = filtered.map((p, i) => {\n              const dedicated = i < MAX_DEDICATED_BOXES ? dedicatedResultsRef.current?.[i] : null;\n              return classifyVehicle({\n                detectorClass: p.class,\n                score: p.score,\n                box: { x: p.bbox[0], y: p.bbox[1], width: p.bbox[2], height: p.bbox[3] },\n                frameWidth,\n                frameHeight,\n                dedicatedLabel: dedicated?.subtype ?? null,\n                dedicatedScore: dedicated?.score ?? null,\n              });\n            });\n\n            const classes = filtered.map((p) => p.class).join(',');\n            if (classes !== lastClassesRef.current) {\n              lastClassesRef.current = classes;\n              setDetectedObjects(filtered.map((p) => p.class));\n            }\n            setDetectionConfidence(filtered.length ? Math.round(Math.max(...filtered.map((p) => p.score)) * 100) : 0);\n\n            // --- Automatic evidence capture ---------------------------------\n            // Only fires once a candidate actually passes the verification\n            // rules. Throttled, de-duplicated, and never blocks the loop.\n            if (\n              DEFAULT_VERIFICATION_CONFIG.autoCaptureConfirmed &&\n              filtered.length &&\n              t - lastAutoCaptureCheckRef.current >= 1200\n            ) {\n              lastAutoCaptureCheckRef.current = t;\n              const liveAuto = liveCaptureCtxRef.current;\n              const personBoxes: Box[] = filtered\n                .filter((p) => p.class === 'person')\n                .map((p) => ({ x: p.bbox[0], y: p.bbox[1], width: p.bbox[2], height: p.bbox[3] }));\n              const speed = liveAuto.speedKmh;\n              const locked = liveAuto.gpsStatus === 'locked';\n              for (const p of filtered) {\n                const cls = p.class;\n                const isTwoWheeler = TWO_WHEELER_CLASSES.includes(cls);\n                const isVehicleish = isVehicleClass(cls);\n                // Only rules we can actually evaluate are auto-triggered.\n                const maybeOverspeed =\n                  isVehicleish && locked && speed > DEFAULT_VERIFICATION_CONFIG.overspeedLimitKmh;\n                const maybeTriple = isTwoWheeler && personBoxes.length >= 2;\n                if (!maybeOverspeed && !maybeTriple) continue;\n\n                const verdictCheck = verifyCandidate(DEFAULT_VERIFICATION_CONFIG, {\n                  detectedClass: cls,\n                  confidence: p.score,\n                  speedKmh: speed,\n                  hasGpsFix: locked,\n                  isVehicle: isVehicleish,\n                  frameStreak: verificationRef.current.streakFor(cls),\n                  now: Date.now(),\n                  tripleRiding: isTwoWheeler\n                    ? {\n                        twoWheeler: { x: p.bbox[0], y: p.bbox[1], width: p.bbox[2], height: p.bbox[3] },\n                        persons: personBoxes,\n                      }\n                    : null,\n                });\n                if (\n                  verdictCheck.status === 'confirmed' &&\n                  verdictCheck.violationType &&\n                  !verificationRef.current.isDuplicate(verdictCheck.violationType, Date.now())\n                ) {\n                  // Fire and forget: captureEvidence serialises itself.\n                  void captureEvidence('auto');\n                  break;\n                }\n              }\n            }\n          } catch {\n            // skip frame\n          } finally {\n            setIsDetecting(false);\n          }\n        }\n        // Draw latest boxes (scaled from video intrinsic size to displayed size)\n        const ctx = c.getContext('2d');\n        if (ctx) {\n          if (c.width !== c.clientWidth) c.width = c.clientWidth;\n          if (c.height !== c.clientHeight) c.height = c.clientHeight;\n          ctx.clearRect(0, 0, c.width, c.height);\n          const sx = c.width / v.videoWidth;\n          const sy = c.height / v.videoHeight;\n          lastPredictionsRef.current.forEach((p, idx) => {\n            const [x, y, w, h] = p.bbox;\n            const verdict = lastVerdictsRef.current[idx];\n            // Green outline = verified subclass (trained model).\n            // Orange outline = heuristic / unverified estimate.\n            ctx.strokeStyle = verdict && !verdict.verified && isVehicleClass(p.class) ? '#FF8C69' : '#22c55e';\n            ctx.lineWidth = 2;\n            ctx.strokeRect(x * sx, y * sy, w * sx, h * sy);\n            const name = verdict ? verdict.label : toDetectedLabel(p.class, p.score).label;\n            const pct = verdict ? Math.round(verdict.confidence * 100) : Math.round(p.score * 100);\n            const mark = verdict && !verdict.verified && isVehicleClass(p.class) ? ' ~' : '';\n            const label = `${name}${mark} ÃÂ¢ÃÂÃÂ¢ ${pct}%`;\n            ctx.font = 'bold 12px monospace';\n            const tw = ctx.measureText(label).width;\n            ctx.fillStyle = 'rgba(0,0,0,0.7)';\n            ctx.fillRect(x * sx, Math.max(0, y * sy - 18), tw + 6, 16);\n            ctx.fillStyle = '#fff';\n            ctx.fillText(label, x * sx + 3, Math.max(12, y * sy - 5));\n          });\n        }\n      }\n    };\n\n    rafRef.current = requestAnimationFrame(loop);\n    return () => {\n      active = false;\n      cancelAnimationFrame(rafRef.current);\n      const c = detectCanvasRef.current;\n      const ctx = c?.getContext('2d');\n      if (c && ctx) ctx.clearRect(0, 0, c.width, c.height);\n      lastPredictionsRef.current = [];\n      lastClassesRef.current = '';\n    };\n  }, [detectionActive, isWebcamActive, modelReady]);\n\n\n  // Save contacts to localStorage\n  useEffect(() => {\n    localStorage.setItem('aegis_emergency_contacts', JSON.stringify(savedContacts));\n  }, [savedContacts]);\n\n  const addContact = () => {\n    if (!newContactName.trim() || !newContactPhone.trim()) return;\n    setSavedContacts((prev) => [\n      ...prev,\n      { id: Date.now().toString(), name: newContactName.trim(), phone: newContactPhone.trim() },\n    ]);\n    setNewContactName('');\n    setNewContactPhone('');\n    setIsAddContactOpen(false);\n  };\n\n  const removeContact = (id: string) => {\n    setSavedContacts((prev) => prev.filter((c) => c.id !== id));\n  };\n\n  const getContactIcon = (type: string) => {\n    switch (type) {\n      case 'police': return AlertOctagon;\n      case 'ambulance': return Heart;\n      case 'fire': return ShieldAlert;\n      default: return Phone;\n    }\n  };\n\n  const speedColor = speedKmh > 80 ? '#FF4D4D' : speedKmh > 50 ? '#FFB347' : '#FFD18C';\n\n\n  return (\n    <div className=\"pt-24 pb-16 px-4 sm:px-8 max-w-[1700px] mx-auto space-y-6\">\n\n      {/* TOP HUD - 2 METRICS - Scrolls naturally with page */}\n      <div className=\"grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4\">\n        {/* 1. Digital Speedometer with Detected Vehicles */}\n        <div className=\"glass-panel p-5 border-cyber-blue/20 relative overflow-hidden\">\n          <div className=\"flex items-center gap-2 mb-3\">\n            <Gauge className=\"w-5 h-5 text-cyber-blue\" />\n            <span className=\"text-[10px] font-black uppercase tracking-widest text-white/40\">Digital Speedometer</span>\n          </div>\n          <div className=\"flex items-end gap-2\">\n            <span className=\"text-4xl font-display font-black tracking-tight\" style={{ color: speedColor }}>\n              {esp32Connected && esp32Data ? esp32Data.speed : speedKmh.toFixed(0)}\n            </span>\n            <span className=\"text-sm text-white/50 font-mono mb-1\">km/h</span>\n          </div>\n          {esp32Connected && esp32Data && (\n            <p className=\"text-[9px] font-mono text-cyber-green mt-1\">ESP32-CAM Live Data</p>\n          )}\n          <div className=\"mt-3 h-2 bg-white/5 rounded-full overflow-hidden\">\n            <motion.div\n              className=\"h-full rounded-full\"\n              style={{ backgroundColor: speedColor }}\n              animate={{ width: `${(speedKmh / 120) * 100}%` }}\n              transition={{ duration: 0.5 }}\n            />\n          </div>\n          {/* Speed history sparkline */}\n          <div className=\"mt-2 flex items-end gap-0.5 h-6\">\n            {speedHistory.map((s, i) => (\n              <div\n                key={i}\n                className=\"flex-1 rounded-t-sm opacity-60\"\n                style={{\n                  height: `${(s / 120) * 100}%`,\n                  backgroundColor: speedColor,\n                }}\n              />\n            ))}\n          </div>\n\n          {/* Feature 1: Detected Vehicles with License Plates */}\n          {detectedVehicles.length > 0 && (\n            <div className=\"mt-3 pt-3 border-t border-white/10\">\n              <p className=\"text-[9px] font-black uppercase tracking-widest text-cyber-blue mb-2 flex items-center gap-1\">\n                <Car className=\"w-3 h-3\" /> Detected Vehicles\n              </p>\n              <div className=\"space-y-1.5 max-h-[120px] overflow-y-auto\">\n                {detectedVehicles.map((vehicle, idx) => (\n                  <div key={vehicle.id} className=\"flex items-center justify-between bg-white/5 rounded-lg px-2 py-1.5\">\n                    <div className=\"flex items-center gap-2\">\n                      <span className=\"text-[9px] font-mono text-white/40\">#{idx + 1}</span>\n                      <span className=\"text-[10px] font-bold text-white\">{vehicle.plate}</span>\n                    </div>\n                    <div className=\"flex items-center gap-2 text-[9px] font-mono\">\n                      <span className=\"text-cyber-green\">{vehicle.distance}m</span>\n                      <span className=\"text-white/50\">{vehicle.speed}km/h</span>\n                    </div>\n                  </div>\n                ))}\n              </div>\n            </div>\n          )}\n        </div>\n\n        {/* 2. ESP32-CAM Connection & Live Stream */}\n        <div className=\"glass-panel p-5 border-cyber-green/20 relative overflow-hidden space-y-3\">\n          <div className=\"flex items-center justify-between gap-3\">\n            <div className=\"flex items-center gap-2 min-w-0\">\n              <Camera className=\"w-5 h-5 text-cyber-green shrink-0\" />\n              <span className=\"text-[10px] font-black uppercase tracking-widest text-white/40 truncate\">ESP32-CAM Stream</span>\n            </div>\n            <button\n              onClick={() => setEsp32Connected(!esp32Connected)}\n              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shrink-0 ${\n                esp32Connected\n                  ? 'bg-cyber-green/20 text-cyber-green border border-cyber-green/30'\n                  : 'bg-cyber-green text-black border border-cyber-green/30'\n              }`}\n            >\n              {esp32Connected ? 'Disconnect' : 'Connect'}\n            </button>\n          </div>\n\n          <div className=\"space-y-1.5\">\n            <p className=\"text-[9px] text-white/40 uppercase tracking-wider\">Stream URL (ESP32-CAM WiFi hotspot)</p>\n            <input\n              type=\"text\"\n              value={esp32StreamUrl}\n              onChange={(e) => setEsp32StreamUrl(e.target.value)}\n              placeholder=\"http://192.168.4.1/stream\"\n              className=\"w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-cyber-green\"\n            />\n          </div>\n\n          {esp32Connected ? (\n            <div className=\"space-y-2\">\n              <div className=\"flex items-center gap-2 text-[10px] font-mono text-cyber-green\">\n                <div className={`w-2 h-2 rounded-full ${esp32StreamStatus === 'live' ? 'bg-cyber-green animate-pulse' : 'bg-cyber-orange'}`} />\n                <span>{esp32StreamStatus === 'live' ? 'Live' : esp32StreamStatus === 'connecting' ? 'Connecting…' : 'Issue'} — {esp32StreamUrl}</span>\n              </div>\n              {esp32Reachable === false && (\n                <p className=\"text-[10px] text-cyber-red\">ESP32 access point (192.168.4.1) unreachable — check WiFi connection.</p>\n              )}\n              {esp32Reachable === true && esp32StreamStatus === 'error' && (\n                <p className=\"text-[10px] text-cyber-orange\">WiFi/AP reachable, but the camera stream is unavailable or errored.</p>\n              )}\n              {esp32StreamError && <p className=\"text-[9px] text-white/50\">{esp32StreamError}</p>}\n              <p className=\"text-[9px] text-white/40\">Live preview is shown in the main camera view (single stream). Resize/rotation does not restart it.</p>\n              {esp32Data && (\n                <div className=\"grid grid-cols-3 gap-2 text-center\">\n                  <div className=\"bg-white/5 rounded-lg p-2\">\n                    <p className=\"text-[8px] text-white/40 uppercase\">Speed</p>\n                    <p className=\"text-xs font-mono font-bold text-cyber-green\">{esp32Data.speed} km/h</p>\n                  </div>\n                  <div className=\"bg-white/5 rounded-lg p-2\">\n                    <p className=\"text-[8px] text-white/40 uppercase\">Persons</p>\n                    <p className=\"text-xs font-mono font-bold text-cyber-blue\">{esp32Data.persons}</p>\n                  </div>\n                  <div className=\"bg-white/5 rounded-lg p-2\">\n                    <p className=\"text-[8px] text-white/40 uppercase\">Plates</p>\n                    <p className=\"text-xs font-mono font-bold text-cyber-purple\">{esp32Data.plates.length}</p>\n                  </div>\n                </div>\n              )}\n              {detectedPersons.length > 0 && (\n                <div className=\"mt-2 space-y-1\">\n                  <p className=\"text-[9px] font-black uppercase tracking-widest text-white/40\">Detected Persons</p>\n                  {detectedPersons.map((person, idx) => (\n                    <div key={idx} className=\"flex items-center gap-2 bg-white/5 rounded-lg px-2 py-1.5\">\n                      <User className=\"w-3.5 h-3.5 text-cyber-blue\" />\n                      <span className=\"text-[10px] font-bold text-white\">{person}</span>\n                    </div>\n                  ))}\n                </div>\n              )}\n            </div>\n          ) : (\n            <div className=\"space-y-2 text-[10px] text-white/50\">\n              <p>1) Connect this device to WiFi: <span className=\"text-white font-mono\">SmartHelmet_AP</span> (password <span className=\"text-white font-mono\">12345678</span>, 2.4&nbsp;GHz, channel&nbsp;1). Not all devices support 2.4&nbsp;GHz (max 4 devices).</p>\n              <p>2) Keep stream URL as <span className=\"text-white font-mono\">http://192.168.4.1/stream</span> and tap <span className=\"text-white/80 font-bold\">Connect</span>. Live video appears in the main camera view.</p>\n              <p className=\"text-white/40\">If the app is opened over HTTPS, the browser may block the local HTTP stream (mixed content). This is separate from WiFi reachability.</p>\n            </div>\n          )}\n        </div>\n\n        {/* 3. GPS Satellite Link */}\n        <div className=\"glass-panel p-5 border-cyber-purple/20 relative overflow-hidden\">\n          <div className=\"flex items-center gap-2 mb-3\">\n            <Radio className=\"w-5 h-5 text-cyber-purple\" />\n            <span className=\"text-[10px] font-black uppercase tracking-widest text-white/40\">GPS Satellite</span>\n          </div>\n          <div className=\"flex items-center gap-2 mb-2\">\n            {gpsStatus === 'locked' ? (\n              <CheckCircle className=\"w-5 h-5 text-cyber-green\" />\n            ) : gpsStatus === 'denied' ? (\n              <WifiOff className=\"w-5 h-5 text-cyber-red\" />\n            ) : (\n              <Wifi className=\"w-5 h-5 text-cyber-purple animate-pulse\" />\n            )}\n            <span className={`text-sm font-display font-black uppercase ${\n              gpsStatus === 'locked' ? 'text-cyber-green' : gpsStatus === 'denied' ? 'text-cyber-red' : 'text-cyber-purple'\n            }`}>\n              {gpsStatus === 'locked' ? '3D Fix Locked' : gpsStatus === 'denied' ? 'Access Denied' : gpsStatus === 'searching' ? 'Acquiring...' : 'Unavailable'}\n            </span>\n          </div>\n          {gpsCoords && (\n            <div className=\"space-y-1\">\n              <p className=\"text-[10px] font-mono text-white/50\">\n                LAT: <span className=\"text-white\">{gpsCoords.lat.toFixed(6)}</span>\n              </p>\n              <p className=\"text-[10px] font-mono text-white/50\">\n                LNG: <span className=\"text-white\">{gpsCoords.lng.toFixed(6)}</span>\n              </p>\n              <p className=\"text-[10px] font-mono text-white/50\">\n                ACC: <span className=\"text-cyber-green\">ÃÂÃÂ±{gpsAccuracy}m</span> | SAT: <span className=\"text-cyber-purple\">{satellites}</span>\n              </p>\n              <p className=\"text-[10px] font-mono text-white/50\">\n                ALT: <span className=\"text-white\">{gpsAltitude !== null ? `${gpsAltitude}m` : 'ÃÂ¢ÃÂÃÂ'}</span> | HDG: <span className=\"text-white\">{gpsHeading !== null ? `${gpsHeading}ÃÂÃÂ°` : 'ÃÂ¢ÃÂÃÂ'}</span> | SPD: <span className=\"text-cyber-green\">{gpsSpeed.toFixed(1)} km/h</span>\n              </p>\n            </div>\n          )}\n          {gpsSignalWeak && gpsStatus !== 'denied' && (\n            <p className=\"text-[9px] text-cyber-orange mt-2\">GPS signal is weak ÃÂ¢ÃÂÃÂ move to open sky for better accuracy.</p>\n          )}\n          {gpsStatus === 'denied' && (\n            <p className=\"text-[9px] text-cyber-red/70 mt-2\">Enable location permissions in browser settings</p>\n          )}\n        </div>\n\n      </div>\n\n      {/* MAIN CONTENT: WEBCAM + DETECTION + TRACKING */}\n      <div className=\"grid grid-cols-1 lg:grid-cols-3 gap-6\">\n        {/* Webcam Feed - Takes 2 columns */}\n        <div className=\"lg:col-span-2 space-y-4\">\n          <div className=\"glass-panel overflow-hidden relative w-full bg-black flex items-center justify-center border-white/10 aspect-[4/3] max-h-[calc(100dvh-10rem)] sm:max-h-[calc(100dvh-8rem)]\" style={{ paddingBottom: \"env(safe-area-inset-bottom, 0px)\" }}>\n            {/* Top badges */}\n            <div className=\"absolute top-4 left-4 z-40 flex items-center gap-2\">\n              <span className=\"px-3 py-1 bg-black/80 backdrop-blur-md border border-white/10 rounded-xl text-[9px] font-black uppercase text-cyber-blue flex items-center gap-1.5\">\n                <span className={`w-2 h-2 rounded-full ${(esp32Connected || isWebcamActive) ? 'bg-cyber-green animate-pulse' : 'bg-white/20'}`} />\n                {esp32Connected ? 'ESP32 LIVE' : isWebcamActive ? 'LIVE FEED' : 'STANDBY'}\n              </span>\n              {detectionActive && (\n                <span className=\"px-3 py-1 bg-black/80 backdrop-blur-md border border-cyber-purple/30 rounded-xl text-[9px] font-black uppercase text-cyber-purple flex items-center gap-1.5\">\n                  <Crosshair className=\"w-3 h-3\" />\n                  YOLOv8 ACTIVE\n                </span>\n              )}\n              {isTracking && (\n                <span className=\"px-3 py-1 bg-black/80 backdrop-blur-md border border-cyber-green/30 rounded-xl text-[9px] font-black uppercase text-cyber-green flex items-center gap-1.5\">\n                  <Signal className=\"w-3 h-3\" />\n                  TRACKING\n                </span>\n              )}\n            </div>\n\n            {/* Webcam controls ÃÂ¢ÃÂÃÂ wrap within the card so they never\n                overflow or get clipped on narrow screens */}\n            <div className=\"absolute top-4 right-4 z-40 flex flex-wrap items-center justify-end gap-2 max-w-[calc(100%-2rem)] sm:max-w-none\">\n              {!isWebcamActive ? (\n                <button\n                  onClick={() => startWebcam()}\n                  className=\"px-4 py-2 bg-cyber-blue text-black rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-all shadow-[0_0_20px_#FF6B35] touch-manipulation\"\n                >\n                  <Camera className=\"w-4 h-4\" />\n                  Start Camera\n                </button>\n              ) : (\n                <>\n                  {/* Front/Rear camera toggle ÃÂ¢ÃÂÃÂ one click, one switch. A single\n                      onClick (no extra touch handlers) so a tap never\n                      switches twice. */}\n                  <button\n                    onClick={() => {\n                      const newFacing = facingModeRef.current === 'user' ? 'environment' : 'user';\n                      startWebcam(newFacing);\n                    }}\n                    disabled={switchingCamera}\n                    aria-busy={switchingCamera}\n                    className=\"px-3 py-2 bg-black/60 backdrop-blur-md border border-white/15 hover:bg-black/80 disabled:opacity-60 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all touch-manipulation\"\n                    title={\n                      switchingCamera\n                        ? 'Switching camera...'\n                        : facingMode === 'user'\n                        ? 'Switch to Rear Camera'\n                        : 'Switch to Front Camera'\n                    }\n                  >\n                    {switchingCamera ? (\n                      <motion.div\n                        animate={{ rotate: 360 }}\n                        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}\n                      >\n                        <Camera className=\"w-4 h-4\" />\n                      </motion.div>\n                    ) : (\n                      <Camera className=\"w-4 h-4\" />\n                    )}\n                    {switchingCamera ? 'Switching' : facingMode === 'user' ? 'Front' : 'Rear'}\n                  </button>\n                  <button\n                    onClick={() => setDetectionActive(!detectionActive)}\n                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all touch-manipulation ${\n                      detectionActive\n                        ? 'bg-cyber-purple text-black shadow-[0_0_20px_#FF8C69]'\n                        : 'bg-black/60 backdrop-blur-md border border-white/15 text-white hover:bg-black/80'\n                    }`}\n                  >\n                    <Crosshair className=\"w-4 h-4\" />\n                    {detectionActive ? 'Stop Detection' : 'YOLOv8 Detect'}\n                  </button>\n                  <button\n                    onClick={() => captureEvidence('manual')}\n                    className=\"px-4 py-2 bg-cyber-green text-black rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-all touch-manipulation\"\n                  >\n                    <Camera className=\"w-4 h-4\" />\n                    Capture\n                  </button>\n                  <button\n                    onClick={stopWebcam}\n                    className=\"px-4 py-2 bg-cyber-red text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-all touch-manipulation\"\n                  >\n                    <CameraOff className=\"w-4 h-4\" />\n                    Stop\n                  </button>\n                </>\n              )}\n            </div>\n\n            {/* When ESP32-CAM stream is connected, show it in the main video slot.\n                When not connected, fall back to the device (webcam) camera. */}\n            {esp32Connected ? (\n              <div className=\"absolute inset-0 w-full h-full bg-black flex items-center justify-center\" style={{ aspectRatio: '4 / 3' }}>\n                {/* Single persistent MJPEG <img>: never use blobs/fetch loops/object URLs.\n                    Keyed only by (re)connect nonce so resize/rotation never recreates it. */}\n                <img\n                  key={esp32StreamNonce}\n                  ref={esp32ImgRef}\n                  src={esp32StreamNonce > 0 ? `${esp32StreamUrl}${esp32StreamUrl.includes('?') ? '&' : '?'}_n=${esp32StreamNonce}` : undefined}\n                  alt=\"ESP32-CAM live stream\"\n                  className=\"w-full h-full object-contain object-center bg-black\"\n                  style={{ maxHeight: '100dvh' }}\n                  referrerPolicy=\"no-referrer\"\n                  onLoad={() => {\n                    esp32ReconnectAttemptRef.current = 0;\n                    esp32ReconnectInFlightRef.current = false;\n                    setEsp32StreamStatus('live');\n                    setEsp32StreamError(null);\n                    // Approximate measured frame/render events per second (best-effort; MJPEG).\n                    const now = performance.now();\n                    const samples = esp32FpsSamplesRef.current;\n                    samples.push(now);\n                    while (samples.length && now - samples[0] > 2000) samples.shift();\n                    if (samples.length >= 2) {\n                      const fps = (samples.length - 1) / ((samples[samples.length - 1] - samples[0]) / 1000);\n                      setEsp32MeasuredFps(Math.round(fps * 10) / 10);\n                    }\n                  }}\n                  onError={() => {\n                    if (!esp32Connected) return;\n                    // Treat as an actual disconnect/error; bounded backoff (no parallel attempts).\n                    setEsp32StreamStatus('error');\n                    scheduleEsp32Reconnect('Stream disconnected or unavailable');\n                  }}\n                />\n                {esp32StreamStatus !== 'live' && (\n                  <div className=\"absolute inset-0 flex items-center justify-center bg-black/60\">\n                    <div className=\"text-center p-6 z-30\">\n                      <Camera className=\"w-14 h-14 text-white/20 mx-auto mb-3\" />\n                      <h3 className=\"text-base font-bold text-white/70 mb-1\">\n                        {esp32StreamStatus === 'connecting' ? 'Connecting to ESP32-CAM…' : 'ESP32 Stream Unavailable'}\n                      </h3>\n                      <p className=\"text-xs text-white/40 max-w-sm mx-auto\">{esp32StreamError || 'Waiting for stream…'}</p>\n                    </div>\n                  </div>\n                )}\n              </div>\n            ) : (\n              <>\n                {/* Video element â always rendered and visible in layout. A display:none\n                    video stops delivering frames, which makes camera switching\n                    report a false failure; the standby overlay below covers it\n                    instead. */}\n                <video\n                  ref={videoRef}\n                  autoPlay\n                  playsInline\n                  muted\n                  className=\"absolute inset-0 w-full h-full object-contain object-center\"\n                />\n                <canvas ref={canvasRef} className=\"hidden\" />\n                <canvas\n                  ref={detectCanvasRef}\n                  className={`absolute inset-0 w-full h-full object-contain object-center pointer-events-none ${isWebcamActive ? 'block' : 'hidden'}`}\n                />\n\n                {/* Detection overlay - only when active (webcam) */}\n                {isWebcamActive && detectionActive && (\n                  <div className=\"absolute inset-0 pointer-events-none z-30\">\n                    <motion.div\n                      initial={{ y: '-10%' }}\n                      animate={{ y: '110%' }}\n                      transition={{ duration: 2, repeat: Infinity, ease: \"linear\" }}\n                      className=\"w-full h-1 bg-gradient-to-r from-transparent via-cyber-purple/50 to-transparent\"\n                    />\n                    {detectedObjects.length > 0 && (\n                      <div className=\"absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2\">\n                        <motion.div\n                          initial={{ opacity: 0, scale: 0.8 }}\n                          animate={{ opacity: 1, scale: 1 }}\n                          className=\"border-2 border-cyber-purple/60 rounded-lg p-4 bg-black/40 backdrop-blur-sm\"\n                        >\n                          <div className=\"flex flex-wrap gap-2 justify-center\">\n                            {[...new Set(lastVerdictsRef.current.map((v) => v.label))].map((label) => (\n                              <span key={label} className=\"px-2 py-1 bg-cyber-purple/20 border border-cyber-purple/40 rounded text-[10px] font-mono text-cyber-purple uppercase\">\n                                {label}\n                              </span>\n                            ))}\n                          </div>\n                        </motion.div>\n                      </div>\n                    )}\n                  </div>\n                )}\n\n                {/* Placeholder when device camera is not active */}\n                {!isWebcamActive && (\n                  <div className=\"absolute inset-0 flex items-center justify-center bg-black\">\n                    <div className=\"text-center p-8 z-30\">\n                      <Camera className=\"w-16 h-16 text-white/10 mx-auto mb-4\" />\n                      <h3 className=\"text-lg font-bold text-white/60 mb-1\">Camera Standby</h3>\n                      <p className=\"text-xs text-white/30 max-w-sm mx-auto\">\n                        {webcamError || 'Start your camera to enable YOLOv8 object detection and vehicle tracking.'}\n                      </p>\n                    </div>\n                  </div>\n                )}\n              </>\n            )}\n\n            {/* Bottom info bar */}\n            <div className=\"absolute bottom-4 left-4 right-4 z-40 flex justify-between items-end\">\n              <div className=\"space-y-1\">\n                <span className=\"text-[9px] font-mono uppercase tracking-widest text-white/40 block\">{esp32Connected ? 'ESP32-CAM Stream' : 'Detection Engine'}</span>\n                <span className=\"font-mono text-xs text-cyber-purple font-bold\">\n                  {esp32Connected ? (esp32MeasuredFps != null ? `Stream: ~${esp32MeasuredFps} fps (measured)` : 'Stream: measuring…') : 'YOLOv8n · 640x640 · detection ~4 Hz (throttled)'}\n                </span>\n              </div>\n              {isDetecting && (\n                <div className=\"flex items-center gap-2 text-cyber-purple\">\n                  <motion.div\n                    animate={{ rotate: 360 }}\n                    transition={{ duration: 1, repeat: Infinity, ease: \"linear\" }}\n                  >\n                    <Crosshair className=\"w-4 h-4\" />\n                  </motion.div>\n                  <span className=\"text-[10px] font-mono uppercase\">Processing...</span>\n                </div>\n              )}\n            </div>\n          </div>\n\n          {/* Feature 7: Tracking Data Panel */}\n          {isTracking && (\n            <div className=\"glass-panel p-5 border-cyber-green/20\">\n              <h3 className=\"text-xs font-black uppercase tracking-widest text-white mb-4 flex items-center gap-2\">\n                <Signal className=\"w-4 h-4 text-cyber-green\" /> Live Tracking Data\n              </h3>\n              <div className=\"grid grid-cols-2 sm:grid-cols-4 gap-3\">\n                <div className=\"bg-white/5 rounded-lg p-3 text-center\">\n                  <p className=\"text-[9px] text-white/40 uppercase\">WiFi Range</p>\n                  <p className=\"text-lg font-display font-black text-cyber-green\">{wifiRange}%</p>\n                </div>\n                <div className=\"bg-white/5 rounded-lg p-3 text-center\">\n                  <p className=\"text-[9px] text-white/40 uppercase\">Data Points</p>\n                  <p className=\"text-lg font-display font-black text-cyber-blue\">{trackingData.length}</p>\n                </div>\n                <div className=\"bg-white/5 rounded-lg p-3 text-center\">\n                  <p className=\"text-[9px] text-white/40 uppercase\">Speed</p>\n                  <p className=\"text-lg font-display font-black text-cyber-purple\">{speedKmh.toFixed(0)} km/h</p>\n                </div>\n                <div className=\"bg-white/5 rounded-lg p-3 text-center\">\n                  <p className=\"text-[9px] text-white/40 uppercase\">Status</p>\n                  <p className=\"text-lg font-display font-black text-cyber-green\">Active</p>\n                </div>\n              </div>\n              {trackingData.length > 0 && (\n                <div className=\"mt-3 p-3 bg-black/40 rounded-lg\">\n                  <p className=\"text-[9px] font-mono text-white/50\">\n                    Last update: {new Date(trackingData[trackingData.length - 1]?.timestamp).toLocaleTimeString()}\n                  </p>\n                </div>\n              )}\n            </div>\n          )}\n\n          {/* Captured / Violation Evidence Gallery */}\n          {evidenceViolations.length > 0 && (\n            <div className=\"glass-panel p-5 border-white/10\">\n              <h3 className=\"text-xs font-black uppercase tracking-widest text-white mb-4 flex items-center gap-2\">\n                <Camera className=\"w-4 h-4 text-cyber-green\" /> Evidence ({evidenceViolations.length})\n              </h3>\n              {storageError && <p className=\"text-[9px] text-cyber-red mb-2\">{storageError}</p>}\n              <div className=\"grid grid-cols-2 sm:grid-cols-3 gap-3\">\n                {evidenceViolations.map((v) => (\n                  <div key={v.id} className=\"relative group\">\n                    <button\n                      type=\"button\"\n                      onClick={() => setViewingEvidence(v.record)}\n                      aria-label={`View details for evidence ${v.label}`}\n                      className=\"block w-full touch-manipulation\"\n                    >\n                      <img\n                        src={v.url}\n                        alt={`Evidence ${v.label}`}\n                        onError={(e) => {\n                          // Gracefully handle a missing / corrupted image file.\n                          const el = e.currentTarget;\n                          el.style.visibility = 'hidden';\n                          el.setAttribute('data-broken', '1');\n                        }}\n                        className=\"w-full h-24 object-cover rounded-xl border border-white/10\"\n                      />\n                    </button>\n                    {/* verification status badge */}\n                    <span\n                      className={`absolute top-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase pointer-events-none ${\n                        v.record.verificationStatus === 'confirmed'\n                          ? 'bg-cyber-green text-black'\n                          : 'bg-cyber-orange text-black'\n                      }`}\n                    >\n                      {v.record.verificationStatus === 'confirmed' ? 'Confirmed' : 'Unverified'}\n                    </span>\n                    {/* review status badge (human workflow) */}\n                    {v.record.reviewStatus && v.record.reviewStatus !== 'pending' && (\n                      <span\n                        className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase pointer-events-none ${\n                          v.record.reviewStatus === 'approved'\n                            ? 'bg-cyber-blue text-black'\n                            : 'bg-cyber-red text-white'\n                        }`}\n                      >\n                        {v.record.reviewStatus === 'approved' ? 'Reviewed' : 'Rejected'}\n                      </span>\n                    )}\n                    {/* actions ÃÂ¢ÃÂÃÂ always visible so they work on touch */}\n                    <div className=\"absolute top-1 right-1 flex gap-1\">\n                      <button onClick={() => setViewingEvidence(v.record)} aria-label=\"View evidence details\" title=\"View details\"\n                        className=\"p-1 bg-black/70 text-white rounded-lg hover:bg-black/90 touch-manipulation\">\n                        <Eye className=\"w-3 h-3\" />\n                      </button>\n                      <button onClick={() => downloadEvidence(v)} aria-label=\"Download evidence\" title=\"Download\"\n                        className=\"p-1 bg-black/70 text-white rounded-lg hover:bg-black/90 touch-manipulation\">\n                        <Download className=\"w-3 h-3\" />\n                      </button>\n                      <button\n                        onClick={() => openEditEvidence(v.record)}\n                        aria-label=\"Edit evidence\" title=\"Edit\"\n                        className=\"p-1 bg-black/70 text-white rounded-lg hover:bg-black/90 touch-manipulation\"\n                      >\n                        <Pencil className=\"w-3 h-3\" />\n                      </button>\n                      <button onClick={() => setConfirmDeleteId(v.id)} aria-label=\"Delete evidence\" title=\"Delete\"\n                        className=\"p-1 bg-cyber-red/80 text-white rounded-lg hover:bg-cyber-red touch-manipulation\">\n                        <Trash2 className=\"w-3 h-3\" />\n                      </button>\n                    </div>\n                    <p className=\"text-[9px] font-mono text-white/60 mt-1 truncate\">{v.label}</p>\n                  </div>\n                ))}\n              </div>\n            </div>\n          )}\n\n          {/* Delete confirmation modal */}\n          {confirmDeleteId && (\n            <div className=\"fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4\">\n              <div className=\"w-full max-w-sm p-5 bg-[#14100D] border border-white/10 rounded-2xl\">\n                <h3 className=\"text-sm font-black text-white mb-2\">Delete evidence?</h3>\n                <p className=\"text-xs text-white/50 mb-5\">This permanently deletes the captured image and its metadata. This cannot be undone.</p>\n                <div className=\"flex gap-2\">\n                  <button onClick={() => setConfirmDeleteId(null)}\n                    className=\"flex-1 py-2.5 bg-white/5 border border-white/10 text-white/70 rounded-xl text-xs font-bold touch-manipulation\">Cancel</button>\n                  <button onClick={() => confirmDeleteEvidence(confirmDeleteId)}\n                    className=\"flex-1 py-2.5 bg-cyber-red text-white rounded-xl text-xs font-black touch-manipulation\">Delete</button>\n                </div>\n              </div>\n            </div>\n          )}\n\n          {/* View evidence details (read-only) */}\n          {viewingEvidence && (\n            <div className=\"fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4\">\n              <div className=\"w-full max-w-md max-h-[90vh] overflow-y-auto p-5 bg-[#14100D] border border-white/10 rounded-2xl\">\n                <div className=\"flex items-center justify-between mb-3\">\n                  <h3 className=\"text-sm font-black text-white\">Evidence details</h3>\n                  <button type=\"button\" onClick={() => setViewingEvidence(null)} aria-label=\"Close details\"\n                    className=\"p-1 text-white/40 hover:text-white touch-manipulation\">\n                    <X className=\"w-4 h-4\" />\n                  </button>\n                </div>\n\n                {evidenceUrlFor(viewingEvidence.id) ? (\n                  <img\n                    src={evidenceUrlFor(viewingEvidence.id)}\n                    alt={`Evidence ${viewingEvidence.type}`}\n                    onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}\n                    className=\"w-full max-h-[40vh] object-contain rounded-xl border border-white/10 mb-4 bg-black\"\n                  />\n                ) : (\n                  <div className=\"w-full py-8 mb-4 px-3 text-center text-[10px] text-white/40 bg-black/40 rounded-xl border border-white/10\">\n                    Image file is missing or could not be read. The metadata below is still available.\n                  </div>\n                )}\n\n                <div className=\"space-y-2 text-[11px]\">\n                  {[\n                    ['Type', viewingEvidence.type],\n                    ['Verification', viewingEvidence.verificationStatus || 'unverified'],\n                    ['Review', viewingEvidence.reviewStatus || 'pending'],\n                    ['Captured', new Date(viewingEvidence.createdAt).toLocaleString()],\n                    ['Speed', viewingEvidence.speed != null ? `${viewingEvidence.speed} km/h` : 'Not recorded'],\n                    ['Confidence', viewingEvidence.confidence != null ? `${viewingEvidence.confidence}%` : 'Not recorded'],\n                    ['Vehicle class', viewingEvidence.vehicleClass || 'Not recorded'],\n                    ['Detected objects', viewingEvidence.objects || 'None'],\n                    ['GPS', viewingEvidence.lat != null && viewingEvidence.lng != null\n                      ? `${viewingEvidence.lat.toFixed(5)}, ${viewingEvidence.lng.toFixed(5)}`\n                      : 'No GPS fix'],\n                  ].map(([k, val]) => (\n                    <div key={k as string} className=\"flex items-start justify-between gap-3 bg-white/5 rounded-lg px-3 py-2\">\n                      <span className=\"text-white/40 font-black uppercase text-[9px] tracking-widest shrink-0\">{k}</span>\n                      <span className=\"text-white/80 text-right break-all\">{val}</span>\n                    </div>\n                  ))}\n                </div>\n\n                {viewingEvidence.reasons && viewingEvidence.reasons.length > 0 && (\n                  <div className=\"mt-3 bg-white/5 rounded-lg px-3 py-2\">\n                    <p className=\"text-[9px] font-black uppercase tracking-widest text-white/40 mb-1\">Verification reasons</p>\n                    <ul className=\"text-[10px] text-white/60 space-y-0.5 list-disc list-inside\">\n                      {viewingEvidence.reasons.map((r, i) => (<li key={i}>{r}</li>))}\n                    </ul>\n                  </div>\n                )}\n\n                {viewingEvidence.reviewNote && (\n                  <div className=\"mt-2 bg-white/5 rounded-lg px-3 py-2\">\n                    <p className=\"text-[9px] font-black uppercase tracking-widest text-white/40 mb-1\">Review note</p>\n                    <p className=\"text-[10px] text-white/70\">{viewingEvidence.reviewNote}</p>\n                  </div>\n                )}\n\n                <div className=\"flex gap-2 mt-4\">\n                  <button\n                    type=\"button\"\n                    onClick={() => {\n                      const item = evidenceViolations.find((x) => x.id === viewingEvidence.id);\n                      if (item) downloadEvidence(item);\n                    }}\n                    className=\"flex-1 py-2.5 bg-cyber-green text-black rounded-xl text-xs font-black touch-manipulation\"\n                  >\n                    Download\n                  </button>\n                  <button\n                    type=\"button\"\n                    onClick={() => { openEditEvidence(viewingEvidence); setViewingEvidence(null); }}\n                    className=\"flex-1 py-2.5 bg-cyber-blue text-black rounded-xl text-xs font-black touch-manipulation\"\n                  >\n                    Edit\n                  </button>\n                </div>\n              </div>\n            </div>\n          )}\n\n          {/* Edit evidence metadata modal (image is never modified) */}\n          {editingEvidence && (\n            <div className=\"fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4\">\n              <div className=\"w-full max-w-sm max-h-[90vh] overflow-y-auto p-5 bg-[#14100D] border border-white/10 rounded-2xl\">\n                <h3 className=\"text-sm font-black text-white mb-4\">Edit evidence</h3>\n                <label className=\"text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1\">Type</label>\n                <input\n                  type=\"text\"\n                  value={editingEvidence.type}\n                  onChange={(e) => setEditingEvidence({ ...editingEvidence, type: e.target.value })}\n                  className=\"w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white mb-3 focus:outline-none focus:border-cyber-blue\"\n                />\n                <label className=\"text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1\">\n                  Speed (km/h) ÃÂ¢ÃÂÃÂ blank keeps captured value\n                </label>\n                <input\n                  type=\"number\"\n                  inputMode=\"decimal\"\n                  min={0}\n                  value={editingEvidence.speed}\n                  onChange={(e) => setEditingEvidence({ ...editingEvidence, speed: e.target.value })}\n                  className=\"w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white mb-3 focus:outline-none focus:border-cyber-blue\"\n                />\n                <label className=\"text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1\">Detected objects</label>\n                <input\n                  type=\"text\"\n                  value={editingEvidence.objects}\n                  onChange={(e) => setEditingEvidence({ ...editingEvidence, objects: e.target.value })}\n                  className=\"w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white mb-3 focus:outline-none focus:border-cyber-blue\"\n                />\n                <label className=\"text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1\">Verification status</label>\n                <div className=\"flex gap-2 mb-3\">\n                  {(['confirmed', 'unverified'] as const).map((s) => (\n                    <button key={s} type=\"button\"\n                      onClick={() => setEditingEvidence({ ...editingEvidence, verificationStatus: s })}\n                      className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase touch-manipulation ${\n                        editingEvidence.verificationStatus === s\n                          ? s === 'confirmed' ? 'bg-cyber-green text-black' : 'bg-cyber-orange text-black'\n                          : 'bg-white/5 text-white/50 border border-white/10'\n                      }`}>\n                      {s}\n                    </button>\n                  ))}\n                </div>\n                <label className=\"text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1\">Review status</label>\n                <div className=\"flex gap-2 mb-3\">\n                  {(['pending', 'approved', 'rejected'] as const).map((s) => (\n                    <button key={s} type=\"button\"\n                      onClick={() => setEditingEvidence({ ...editingEvidence, reviewStatus: s })}\n                      className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase touch-manipulation ${\n                        editingEvidence.reviewStatus === s\n                          ? s === 'approved' ? 'bg-cyber-blue text-black'\n                            : s === 'rejected' ? 'bg-cyber-red text-white'\n                            : 'bg-white/20 text-white'\n                          : 'bg-white/5 text-white/50 border border-white/10'\n                      }`}>\n                      {s}\n                    </button>\n                  ))}\n                </div>\n                <label className=\"text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1\">Review note</label>\n                <textarea\n                  rows={2}\n                  value={editingEvidence.reviewNote}\n                  onChange={(e) => setEditingEvidence({ ...editingEvidence, reviewNote: e.target.value })}\n                  placeholder=\"Optional note for the audit trail\"\n                  className=\"w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white mb-3 focus:outline-none focus:border-cyber-blue resize-y\"\n                />\n                <p className=\"text-[9px] text-white/30 mb-4\">The original captured image is always preserved.</p>\n                <div className=\"flex gap-2\">\n                  <button onClick={() => setEditingEvidence(null)}\n                    className=\"flex-1 py-2.5 bg-white/5 border border-white/10 text-white/70 rounded-xl text-xs font-bold touch-manipulation\">Cancel</button>\n                  <button onClick={saveEvidenceEdit}\n                    className=\"flex-1 py-2.5 bg-cyber-blue text-black rounded-xl text-xs font-black touch-manipulation\">Save</button>\n                </div>\n              </div>\n            </div>\n          )}\n\n          {/* Detection Results Panel */}\n          <div className=\"glass-panel p-5 border-white/10\">\n            <h3 className=\"text-xs font-black uppercase tracking-widest text-white mb-4 flex items-center gap-2\">\n              <Crosshair className=\"w-4 h-4 text-cyber-purple\" /> YOLOv8 Detection Results\n            </h3>\n            {detectedObjects.length > 0 ? (\n              <>\n                <div className=\"grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3\">\n                  {lastVerdictsRef.current.map((v, i) => (\n                    <div key={i} className=\"bg-white/5 border border-white/10 rounded-xl p-3 text-center\">\n                      <p className=\"text-sm font-bold text-white\">{v.label}</p>\n                      <p className=\"text-[9px] font-mono text-cyber-purple mt-1\">Confidence: {Math.round(v.confidence * 100)}%</p>\n                      <span\n                        className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${\n                          v.verified ? 'bg-cyber-green/20 text-cyber-green' : 'bg-cyber-orange/20 text-cyber-orange'\n                        }`}\n                      >\n                        {v.verified ? 'Verified' : 'Heuristic'}\n                      </span>\n                      <p className=\"text-[8px] font-mono text-white/30 mt-1 leading-tight\">{v.basis}</p>\n                    </div>\n                  ))}\n                </div>\n                <p className=\"text-[9px] font-mono text-white/30 mt-3 leading-relaxed\">\n                  {dedicatedModelActive\n                    ? 'Trained Indian-vehicle classifier active ÃÂ¢ÃÂÃÂ verified subclasses.'\n                    : VEHICLE_SUBTYPE_LIMITATION}\n                </p>\n              </>\n            ) : (\n              <div className=\"text-center py-8 text-white/20 text-xs\">\n                <Crosshair className=\"w-10 h-10 mx-auto mb-2 opacity-20\" />\n                Start camera and enable detection to see results\n              </div>\n            )}\n          </div>\n        </div>\n\n        {/* RIGHT COLUMN: Quick Actions & Status */}\n        <div className=\"space-y-4\">\n          {/* Emergency Contacts: emergency services + personal contacts in one\n                unified panel, matching the dark AEGIS card language. */}\n          <div className=\"glass-panel p-5 border-white/10 space-y-4\">\n            <div className=\"flex items-center justify-between\">\n              <h3 className=\"text-xs font-black uppercase tracking-widest text-white flex items-center gap-2\">\n                <ShieldAlert className=\"w-4 h-4 text-cyber-red\" /> Emergency Contacts\n              </h3>\n              <button\n                onClick={() => setIsAddContactOpen(true)}\n                className=\"flex items-center gap-1.5 px-2.5 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-wider text-white/60 hover:text-white transition-all touch-manipulation\"\n                title=\"Add Emergency Contact\"\n              >\n                <Plus className=\"w-3.5 h-3.5\" /> Add\n              </button>\n            </div>\n\n            {/* Emergency services - prominent, distinct colours, real tel: actions */}\n            <div className=\"space-y-2\">\n              <p className=\"text-[9px] font-black uppercase tracking-widest text-white/30\">Emergency Services</p>\n              <div className=\"space-y-2\">\n                <a\n                  href=\"tel:100\"\n                  className=\"w-full py-3.5 bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-blue-500/30 active:scale-[0.99] transition-all touch-manipulation\"\n                >\n                  <AlertOctagon className=\"w-4 h-4\" /> Police <span className=\"font-mono\">100</span>\n                </a>\n                <a\n                  href=\"tel:102\"\n                  className=\"w-full py-3.5 bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-red-500/30 active:scale-[0.99] transition-all touch-manipulation\"\n                >\n                  <Heart className=\"w-4 h-4\" /> Ambulance <span className=\"font-mono\">102</span>\n                </a>\n                <a\n                  href=\"tel:112\"\n                  className=\"w-full py-3.5 bg-white/5 border border-white/10 text-white/70 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-white/10 active:scale-[0.99] transition-all touch-manipulation\"\n                >\n                  <Phone className=\"w-4 h-4\" /> Emergency <span className=\"font-mono\">112</span>\n                </a>\n              </div>\n            </div>\n\n            {/* Saved personal contacts - clean, consistent rows */}\n            {savedContacts.length > 0 && (\n              <div className=\"space-y-2\">\n                <p className=\"text-[9px] font-black uppercase tracking-widest text-white/30\">Saved Contacts</p>\n                <div className=\"space-y-2\">\n                  {savedContacts.map((contact) => (\n                    <div\n                      key={contact.id}\n                      className=\"flex items-center justify-between gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5\"\n                    >\n                      <div className=\"flex items-center gap-2.5 min-w-0\">\n                        <div className=\"w-8 h-8 rounded-full bg-cyber-blue/15 border border-cyber-blue/20 flex items-center justify-center shrink-0\">\n                          <User className=\"w-3.5 h-3.5 text-cyber-blue\" />\n                        </div>\n                        <div className=\"min-w-0\">\n                          <p className=\"text-xs font-bold text-white truncate\">{contact.name}</p>\n                          <p className=\"text-[10px] font-mono text-white/40\">{contact.phone}</p>\n                        </div>\n                      </div>\n                      <div className=\"flex items-center gap-1.5 shrink-0\">\n                        <a\n                          href={`tel:${contact.phone}`}\n                          aria-label={`Call ${contact.name}`}\n                          className=\"p-2 bg-cyber-blue/10 text-cyber-blue rounded-lg hover:bg-cyber-blue/20 transition-colors touch-manipulation\"\n                        >\n                          <Phone className=\"w-3.5 h-3.5\" />\n                        </a>\n                        <button\n                          onClick={() => removeContact(contact.id)}\n                          aria-label={`Delete ${contact.name}`}\n                          className=\"p-2 bg-white/5 text-white/30 rounded-lg hover:text-cyber-red hover:bg-cyber-red/10 transition-colors touch-manipulation\"\n                        >\n                          <Trash2 className=\"w-3.5 h-3.5\" />\n                        </button>\n                      </div>\n                    </div>\n                  ))}\n                </div>\n              </div>\n            )}\n          </div>\n\n          {/* System Status */}\n          <div className=\"glass-panel p-5 border-white/10 space-y-3\">\n            <h3 className=\"text-xs font-black uppercase tracking-widest text-white flex items-center gap-2\">\n              <Activity className=\"w-4 h-4 text-cyber-green\" /> System Status\n            </h3>\n            <div className=\"space-y-2\">\n              {[\n                { label: 'YOLOv8 Engine', status: 'Ready', color: 'text-cyber-green' },\n                { label: 'Camera Module', status: isWebcamActive ? 'Active' : 'Standby', color: isWebcamActive ? 'text-cyber-green' : 'text-white/40' },\n                { label: 'GPS Module', status: gpsStatus === 'locked' ? 'Locked' : 'Searching', color: gpsStatus === 'locked' ? 'text-cyber-green' : 'text-cyber-orange' },\n                { label: 'ESP32-CAM', status: esp32Connected ? 'Connected' : 'Disconnected', color: esp32Connected ? 'text-cyber-green' : 'text-white/40' },\n                { label: 'Tracking', status: isTracking ? 'Active' : 'Off', color: isTracking ? 'text-cyber-green' : 'text-white/40' },\n                { label: 'Internet', status: 'Connected', color: 'text-cyber-green' },\n              ].map((item, i) => (\n                <div key={i} className=\"flex items-center justify-between bg-white/5 rounded-lg px-3 py-2\">\n                  <span className=\"text-[10px] font-bold text-white/60\">{item.label}</span>\n                  <span className={`text-[10px] font-mono font-bold ${item.color}`}>{item.status}</span>\n                </div>\n              ))}\n            </div>\n          </div>\n\n          {/* (Saved Contacts are shown inside the unified Emergency Contacts\n                panel above - this separate card was removed to avoid duplication\n                and to keep one consistent card style.) */}\n        </div>\n      </div>\n\n      {/* Add Contact Modal */}\n      <Dialog.Root open={isAddContactOpen} onOpenChange={setIsAddContactOpen}>\n        <AnimatePresence>\n          {isAddContactOpen && (\n            <Dialog.Portal forceMount>\n              <Dialog.Overlay asChild>\n                <motion.div\n                  initial={{ opacity: 0 }}\n                  animate={{ opacity: 1 }}\n                  exit={{ opacity: 0 }}\n                  className=\"fixed inset-0 bg-black/80 backdrop-blur-md z-[200]\"\n                />\n              </Dialog.Overlay>\n              <Dialog.Content asChild>\n                <div className=\"fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md p-4 z-[201]\">\n                  <motion.div\n                    initial={{ opacity: 0, scale: 0.9 }}\n                    animate={{ opacity: 1, scale: 1 }}\n                    exit={{ opacity: 0, scale: 0.9 }}\n                    className=\"bg-[#121216] border border-white/10 rounded-3xl p-7 shadow-2xl\"\n                  >\n                    <h2 className=\"text-xl font-display font-black text-white mb-6\">Add Emergency Contact</h2>\n                    <div className=\"space-y-4\">\n                      <div>\n                        <label className=\"text-[10px] font-mono uppercase tracking-widest text-white/50 block mb-1\">Name</label>\n                        <input\n                          type=\"text\"\n                          placeholder=\"Contact name\"\n                          value={newContactName}\n                          onChange={(e) => setNewContactName(e.target.value)}\n                          className=\"w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyber-blue\"\n                        />\n                      </div>\n                      <div>\n                        <label className=\"text-[10px] font-mono uppercase tracking-widest text-white/50 block mb-1\">Phone Number</label>\n                        <input\n                          type=\"tel\"\n                          placeholder=\"Phone number\"\n                          value={newContactPhone}\n                          onChange={(e) => setNewContactPhone(e.target.value)}\n                          className=\"w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyber-blue\"\n                        />\n                      </div>\n                    </div>\n                    <div className=\"flex gap-3 mt-6\">\n                      <button\n                        onClick={() => setIsAddContactOpen(false)}\n                        className=\"flex-1 py-3 bg-white/5 border border-white/10 text-white/60 rounded-xl text-sm font-bold hover:bg-white/10 transition-all\"\n                      >\n                        Cancel\n                      </button>\n                      <button\n                        onClick={addContact}\n                        className=\"flex-1 py-3 bg-cyber-blue text-black rounded-xl text-sm font-black hover:scale-[1.02] transition-all\"\n                      >\n                        Add Contact\n                      </button>\n                    </div>\n                  </motion.div>\n                </div>\n              </Dialog.Content>\n            </Dialog.Portal>\n          )}\n        </AnimatePresence>\n      </Dialog.Root>\n\n      {/* Verification result toast */}\n      {captureResult && (\n        <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-[210] max-w-[92vw] px-4 py-3 rounded-2xl border shadow-2xl ${\n          captureResult.status === 'confirmed'\n            ? 'bg-cyber-green/95 border-cyber-green text-black'\n            : captureResult.status === 'unverified'\n            ? 'bg-cyber-orange/95 border-cyber-orange text-black'\n            : 'bg-cyber-red/95 border-cyber-red text-white'\n        }`}>\n          <div className=\"flex items-start gap-3\">\n            <div className=\"flex-1 min-w-0\">\n              <p className=\"text-xs font-black uppercase tracking-wider\">\n                {captureResult.status === 'confirmed'\n                  ? `Confirmed: ${captureResult.violationType || 'Violation'}`\n                  : captureResult.status === 'unverified'\n                  ? `Candidate ÃÂ¢ÃÂÃÂ requires review${captureResult.violationType ? ` (${captureResult.violationType})` : ''}`\n                  : 'Capture rejected'}\n              </p>\n              <ul className=\"text-[10px] font-mono mt-1 space-y-0.5 list-disc list-inside\">\n                {captureResult.reasons.map((r, i) => <li key={i}>{r}</li>)}\n              </ul>\n            </div>\n            <button onClick={() => setCaptureResult(null)} aria-label=\"Dismiss\"\n              className=\"shrink-0 p-1 text-current opacity-70 hover:opacity-100 touch-manipulation\">\n              <X className=\"w-4 h-4\" />\n            </button>\n          </div>\n        </div>\n      )}\n\n      {/* Portal-based dropdowns - rendered to document.body to escape all clipping contexts */}\n    </div>\n  );\n}\n","sv":"import React, { useState, useEffect } from 'react';\nimport {\n  Wifi,\n  Database,\n  Settings as SettingsIcon,\n  Globe,\n  RefreshCcw,\n  User,\n  Phone,\n  Save,\n  ShieldAlert,\n  Cpu,\n  Zap,\n  CreditCard,\n  ChevronRight,\n  CheckCircle,\n  Download,\n  Upload,\n  Search,\n  AlertTriangle,\n  FileSpreadsheet,\n  Layers,\n  Server,\n  Activity,\n} from 'lucide-react';\nimport { motion, AnimatePresence } from 'motion/react';\nimport { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';\nimport { doc, getDoc, updateDoc, collection, onSnapshot, getDocs, setDoc } from 'firebase/firestore';\nimport {\n  RTOVehicle,\n  SAMPLE_RTO_VEHICLES,\n  seedRTODatabase,\n  exportVehiclesToJSON,\n  exportVehiclesToCSV,\n  parseVehiclesFromCSV,\n} from '../lib/rtoData';\nimport { LOCAL_PROFILE_STORAGE_KEY, LOCAL_AUTH_STORAGE_KEY } from '../types/auth';\n\nexport default function SettingsView() {\n  const [wifiStatus, setWifiStatus] = useState<'disconnected' | 'scanning' | 'handshake' | 'connected'>('disconnected');\n  const [profile, setProfile] = useState<any>(null);\n  const [originalProfile, setOriginalProfile] = useState<any>(null);\n  const [isSaving, setIsSaving] = useState(false);\n  const [showSuccess, setShowSuccess] = useState(false);\n  const [isDirty, setIsDirty] = useState(false);\n  const [errors, setErrors] = useState<{ [key: string]: string }>({});\n  const [foundModules, setFoundModules] = useState<{ name: string; signal: number; id: string; type: 'module' | 'router' }[]>([]);\n  const [aiSensitivity, setAiSensitivity] = useState(85);\n  const [activeCategory, setActiveCategory] = useState<'profile' | 'dataset' | 'hardware' | 'network' | 'billing'>('profile');\n\n  // Dataset Tab State\n  const [rtoVehicleCount, setRtoVehicleCount] = useState(0);\n  const [isSeeding, setIsSeeding] = useState(false);\n  const [datasetMessage, setDatasetMessage] = useState<string | null>(null);\n  const [testPlateQuery, setTestPlateQuery] = useState('');\n  const [testPlateResult, setTestPlateResult] = useState<RTOVehicle | null | 'NOT_FOUND'>(null);\n  const [esp32StreamUrl, setEsp32StreamUrl] = useState('http://192.168.4.1/stream');\n\n  useEffect(() => {\n    const fetchProfile = async () => {\n      if (auth.currentUser) {\n        try {\n          const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));\n          if (userDoc.exists()) {\n            setProfile(userDoc.data());\n            setOriginalProfile(userDoc.data());\n            return;\n          }\n        } catch (e) {\n          console.error('Profile fetch failed:', e);\n        }\n      }\n\n      // Guest / Local profile fallback\n      const savedProfile = localStorage.getItem(LOCAL_PROFILE_STORAGE_KEY) || localStorage.getItem('aegis_guest_profile');\n      const savedAuth = localStorage.getItem(LOCAL_AUTH_STORAGE_KEY);\n      const parsedAuth = savedAuth ? JSON.parse(savedAuth) : null;\n\n      const defaultProfile = savedProfile ? JSON.parse(savedProfile) : {\n        name: parsedAuth?.displayName || 'Guest Sentry Pilot',\n        email: parsedAuth?.email || 'guest@aegis-sentry.local',\n        phone: '9876543210',\n        role: parsedAuth?.role || 'Driver',\n        emergencyContact1: { name: 'Dispatch Station 112', phone: '1120001122' },\n        emergencyContact2: { name: 'Emergency Control', phone: '1080001088' },\n        autoReport: true,\n        guardianNotifications: true,\n      };\n      setProfile(defaultProfile);\n      setOriginalProfile(defaultProfile);\n    };\n    fetchProfile();\n\n    // Listen to RTO database count\n    const unsubscribeVehicles = onSnapshot(collection(db, 'vehicles'), (snapshot) => {\n      setRtoVehicleCount(snapshot.docs.length);\n    }, () => {\n      // ignore\n    });\n\n    return () => unsubscribeVehicles();\n  }, []);\n\n  const handleTextChange = (value: string | boolean, field: string, subfield?: string) => {\n    setIsDirty(true);\n    setShowSuccess(false);\n    const errorKey = subfield ? `${field}.${subfield}` : field;\n    if (errors[errorKey]) {\n      const newErrors = { ...errors };\n      delete newErrors[errorKey];\n      setErrors(newErrors);\n    }\n\n    if (subfield) {\n      setProfile((prev: any) => ({\n        ...prev,\n        [field]: { ...(prev?.[field] || {}), [subfield]: value },\n      }));\n    } else {\n      setProfile((prev: any) => ({ ...prev, [field]: value }));\n    }\n  };\n\n  const validateInputs = () => {\n    if (!profile) return false;\n    // Primary mobile must be exactly 10 digits.\n    const phoneRegex = /^\\d{10}$/;\n    const nameRegex = /^[a-zA-Z\\s]+$/;\n    const newErrors: { [key: string]: string } = {};\n\n    if (!profile.name || profile.name.trim() === '' || !nameRegex.test(profile.name)) {\n      newErrors.name = 'Valid name is required (letters only)';\n    }\n    if (!profile.phone || profile.phone.trim() === '' || !phoneRegex.test(profile.phone)) {\n      newErrors.phone = 'Valid 10-15 digit mobile is required';\n    }\n    if (\n      profile.emergencyContact1?.name &&\n      profile.emergencyContact1.name.trim() !== '' &&\n      !nameRegex.test(profile.emergencyContact1.name)\n    ) {\n      newErrors['emergencyContact1.name'] = 'Letters only';\n    }\n    if (\n      profile.emergencyContact1?.phone &&\n      profile.emergencyContact1.phone.trim() !== '' &&\n      !phoneRegex.test(profile.emergencyContact1.phone)\n    ) {\n      newErrors['emergencyContact1.phone'] = 'Exactly 10 digits only';\n    }\n\n    setErrors(newErrors);\n    return Object.keys(newErrors).length === 0;\n  };\n\n  const saveProfile = async () => {\n    if (!profile) return;\n    if (!validateInputs()) return;\n    setIsSaving(true);\n    try {\n      if (auth.currentUser) {\n        await updateDoc(doc(db, 'users', auth.currentUser.uid), {\n          ...profile,\n          updatedAt: new Date().toISOString(),\n        });\n      }\n      localStorage.setItem(LOCAL_PROFILE_STORAGE_KEY, JSON.stringify(profile));\n      localStorage.setItem('aegis_guest_profile', JSON.stringify(profile));\n      setOriginalProfile({ ...profile });\n      setIsDirty(false);\n      setShowSuccess(true);\n      setTimeout(() => setShowSuccess(false), 5000);\n    } catch (error) {\n      if (auth.currentUser) {\n        handleFirestoreError(error, OperationType.UPDATE, `users/${auth.currentUser.uid}`);\n      } else {\n        console.warn('Local profile save warning:', error);\n      }\n    } finally {\n      setIsSaving(false);\n    }\n  };\n\n  // RTO Seeding from Settings\n  const handleSeedRTO = async () => {\n    setIsSeeding(true);\n    setDatasetMessage(null);\n    try {\n      const res = await seedRTODatabase();\n      if (res.success) {\n        setDatasetMessage(`Successfully populated ${res.count} records into the RTO Central Database.`);\n      } else {\n        setDatasetMessage(`Error: ${res.error}`);\n      }\n    } catch (e: any) {\n      setDatasetMessage(`Error: ${e.message}`);\n    } finally {\n      setIsSeeding(false);\n    }\n  };\n\n  // Test Plate Lookup\n  const handleTestLookup = async (e: React.FormEvent) => {\n    e.preventDefault();\n    if (!testPlateQuery.trim()) return;\n\n    try {\n      const docId = testPlateQuery.trim().toUpperCase();\n      const snap = await getDoc(doc(db, 'vehicles', docId));\n      if (snap.exists()) {\n        setTestPlateResult(snap.data() as RTOVehicle);\n      } else {\n        // Search by loose string matching across collection\n        const allSnap = await getDocs(collection(db, 'vehicles'));\n        const matched = allSnap.docs\n          .map((d) => d.data() as RTOVehicle)\n          .find(\n            (v) =>\n              v.registrationNumber.replace(/[\\s-]/g, '').toUpperCase() ===\n              testPlateQuery.replace(/[\\s-]/g, '').toUpperCase()\n          );\n        if (matched) {\n          setTestPlateResult(matched);\n        } else {\n          setTestPlateResult('NOT_FOUND');\n        }\n      }\n    } catch (err: any) {\n      console.error('Test lookup error:', err);\n      setTestPlateResult('NOT_FOUND');\n    }\n  };\n\n  // Export RTO\n  const handleExportRTO = async (format: 'csv' | 'json') => {\n    const snap = await getDocs(collection(db, 'vehicles'));\n    const list = snap.docs.map((d) => d.data() as RTOVehicle);\n    if (format === 'json') {\n      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(exportVehiclesToJSON(list));\n      const a = document.createElement('a');\n      a.setAttribute('href', dataStr);\n      a.setAttribute('download', `rto_dataset_${Date.now()}.json`);\n      a.click();\n    } else {\n      const dataStr = 'data:text/csv;charset=utf-8,' + encodeURIComponent(exportVehiclesToCSV(list));\n      const a = document.createElement('a');\n      a.setAttribute('href', dataStr);\n      a.setAttribute('download', `rto_dataset_${Date.now()}.csv`);\n      a.click();\n    }\n  };\n\n  // CSV Import\n  const handleCSVUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {\n    const file = e.target.files?.[0];\n    if (!file) return;\n    const reader = new FileReader();\n    reader.onload = async (event) => {\n      try {\n        const text = event.target?.result as string;\n        const parsed = parseVehiclesFromCSV(text);\n        if (parsed.length === 0) {\n          setDatasetMessage('No valid vehicle records found in the CSV file.');\n          return;\n        }\n\n        let count = 0;\n        for (const v of parsed) {\n          const docId = v.registrationNumber.trim().toUpperCase();\n          await setDoc(doc(db, 'vehicles', docId), {\n            ...v,\n            registrationNumber: docId,\n            updatedAt: new Date().toISOString(),\n          });\n          count++;\n        }\n        setDatasetMessage(`Imported ${count} vehicles into RTO database successfully.`);\n      } catch (err: any) {\n        setDatasetMessage('CSV Import error: ' + err.message);\n      }\n    };\n    reader.readAsText(file);\n  };\n\n  const startDiscovery = () => {\n    setWifiStatus('scanning');\n    setFoundModules([]);\n    setTimeout(() => {\n      setFoundModules([\n        { name: 'Aegis-Helmet-V1-092 (BLE Smart Helmet)', signal: -45, id: 'MAC_AE:09:2F:88', type: 'module' },\n        { name: 'ESP32-CAM-HOTSPOT (192.168.4.1)', signal: -52, id: 'MAC_ES:32:CA:M1', type: 'module' },\n        { name: 'Roadside_Sentry_Tower_5G', signal: -62, id: 'MAC_RT:88:AA:CC', type: 'router' },\n      ]);\n    }, 1500);\n  };\n\n  const confirmConnection = () => {\n    setWifiStatus('handshake');\n    setTimeout(() => setWifiStatus('connected'), 1500);\n  };\n\n  return (\n    <div className=\"pt-28 pb-16 px-4 sm:px-8 max-w-[1600px] mx-auto min-h-screen\">\n      <div className=\"flex flex-col lg:flex-row gap-8 lg:gap-12\">\n        {/* SIDE NAV - SYSTEM CATEGORIES */}\n        <div className=\"lg:w-80 space-y-4\">\n          <div>\n            <h1 className=\"text-3xl sm:text-4xl font-display font-black tracking-tight mb-1 text-white\">\n              SYSTEM CONFIG\n            </h1>\n            <p className=\"text-[10px] font-mono text-white/40 uppercase tracking-[0.25em]\">\n              Node: AE-992-X-KRYPTON\n            </p>\n          </div>\n\n          <div className=\"space-y-2 pt-4\">\n            {[\n              { id: 'profile', label: 'Identity & Contacts', icon: User },\n              { id: 'dataset', label: 'Manual Dataset Management', icon: Database, badge: `${rtoVehicleCount} RCs` },\n              { id: 'hardware', label: 'Hardware & BLE Modules', icon: Cpu },\n              { id: 'network', label: 'Network & Cloud Engine', icon: Globe },\n              { id: 'billing', label: 'Executive Protocols', icon: CreditCard },\n            ].map((cat) => (\n              <button\n                key={cat.id}\n                onClick={() => setActiveCategory(cat.id as any)}\n                className={`w-full p-4 rounded-2xl flex items-center justify-between group transition-all ${\n                  activeCategory === cat.id\n                    ? 'bg-cyber-blue text-black shadow-[0_0_20px_#FF6B35]'\n                    : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white'\n                }`}\n              >\n                <div className=\"flex items-center gap-3.5\">\n                  <cat.icon className=\"w-5 h-5 shrink-0\" />\n                  <span className=\"text-xs font-black uppercase tracking-wider text-left\">{cat.label}</span>\n                </div>\n                <div className=\"flex items-center gap-2\">\n                  {cat.badge && (\n                    <span\n                      className={`text-[9px] font-mono px-2 py-0.5 rounded-full ${\n                        activeCategory === cat.id ? 'bg-black text-cyber-blue' : 'bg-white/10 text-white/60'\n                      }`}\n                    >\n                      {cat.badge}\n                    </span>\n                  )}\n                  <ChevronRight\n                    className={`w-4 h-4 transition-transform ${\n                      activeCategory === cat.id ? 'translate-x-1' : 'opacity-0'\n                    }`}\n                  />\n                </div>\n              </button>\n            ))}\n          </div>\n\n          {wifiStatus === 'connected' && (\n            <div className=\"glass-panel p-6 border-cyber-green/30 mt-6 bg-cyber-green/5\">\n              <div className=\"flex items-center gap-3 mb-3\">\n                <div className=\"w-2.5 h-2.5 rounded-full bg-cyber-green animate-pulse\" />\n                <span className=\"text-[10px] font-black uppercase text-cyber-green tracking-widest\">\n                  Helmet BLE Link Active\n                </span>\n              </div>\n              <p className=\"text-[10px] text-white/60 uppercase font-mono\">\n                Latency: 11ms Ã¢ÂÂ¢ Protocol: ESP32-Cam Stream\n              </p>\n            </div>\n          )}\n        </div>\n\n        {/* MAIN CONFIGURATION DISPLAY */}\n        <div className=\"flex-1\">\n          <AnimatePresence mode=\"wait\">\n            {/* 1. PROFILE & GUARDIAN CONTACTS */}\n            {activeCategory === 'profile' && (\n              <motion.div\n                key=\"profile\"\n                initial={{ opacity: 0, x: 20 }}\n                animate={{ opacity: 1, x: 0 }}\n                exit={{ opacity: 0, x: -20 }}\n                className=\"space-y-8\"\n              >\n                <div className=\"glass-panel p-6 sm:p-8 border-white/10\">\n                  <div className=\"flex items-center gap-4 mb-8\">\n                    <div className=\"p-4 bg-cyber-blue/10 rounded-2xl border border-cyber-blue/20\">\n                      <User className=\"w-8 h-8 text-cyber-blue\" />\n                    </div>\n                    <div>\n                      <h2 className=\"text-2xl font-display font-black tracking-tight text-white\">CITIZEN PROFILE</h2>\n                      <p className=\"text-[10px] font-mono text-white/40 uppercase tracking-[0.25em]\">\n                        User UID: {auth.currentUser?.uid || 'ANONYMOUS'}\n                      </p>\n                    </div>\n                  </div>\n\n                  <div className=\"grid grid-cols-1 md:grid-cols-2 gap-6\">\n                    <div className=\"space-y-2\">\n                      <label className=\"text-[10px] font-black uppercase tracking-widest text-white/40 flex items-center gap-2\">\n                        <User className=\"w-3.5 h-3.5 text-cyber-blue\" /> Full Legal Name *\n                      </label>\n                      <input\n                        value={profile?.name || ''}\n                        onChange={(e) => handleTextChange(e.target.value, 'name')}\n                        placeholder=\"e.g. John Doe\"\n                        className={`w-full bg-white/5 border p-4 rounded-xl text-sm font-bold text-white focus:outline-none focus:border-cyber-blue transition-all ${\n                          errors.name ? 'border-cyber-red' : 'border-white/10'\n                        }`}\n                      />\n                      {errors.name && <p className=\"text-[9px] text-cyber-red font-bold\">{errors.name}</p>}\n                    </div>\n\n                    <div className=\"space-y-2\">\n                      <label className=\"text-[10px] font-black uppercase tracking-widest text-white/40 flex items-center gap-2\">\n                        <Phone className=\"w-3.5 h-3.5 text-cyber-blue\" /> Primary Mobile Contact *\n                      </label>\n                      <input\n                        type=\"tel\"\n                        inputMode=\"numeric\"\n                        pattern=\"[0-9]*\"\n                        maxLength={10}\n                        value={profile?.phone || ''}\n                        onChange={(e) =>\n                          handleTextChange(e.target.value.replace(/\\D/g, '').slice(0, 10), 'phone')\n                        }\n                        placeholder=\"Enter Mobile Number\"\n                        className={`w-full bg-white/5 border p-4 rounded-xl text-sm font-bold text-white focus:outline-none focus:border-cyber-blue transition-all ${\n                          errors.phone ? 'border-cyber-red' : 'border-white/10'\n                        }`}\n                      />\n                      {errors.phone && <p className=\"text-[9px] text-cyber-red font-bold\">{errors.phone}</p>}\n                    </div>\n\n                    <div className=\"space-y-2\">\n                      <label className=\"text-[10px] font-black uppercase tracking-widest text-white/40 flex items-center gap-2\">\n                        Driving License ID\n                      </label>\n                      <input\n                        value={profile?.licenseNumber || ''}\n                        onChange={(e) => handleTextChange(e.target.value, 'licenseNumber')}\n                        placeholder=\"e.g. DL-1420110012345\"\n                        className=\"w-full bg-white/5 border border-white/10 p-4 rounded-xl text-sm font-bold text-white focus:outline-none focus:border-cyber-blue\"\n                      />\n                    </div>\n\n                    <div className=\"space-y-2\">\n                      <label className=\"text-[10px] font-black uppercase tracking-widest text-white/40 flex items-center gap-2\">\n                        Blood Group (Emergency Medical)\n                      </label>\n                      <select\n                        value={profile?.bloodGroup || ''}\n                        onChange={(e) => handleTextChange(e.target.value, 'bloodGroup')}\n                        className={`w-full bg-white/5 border border-white/10 p-4 rounded-xl text-sm focus:outline-none focus:border-cyber-blue transition-colors ${\n                          profile?.bloodGroup\n                            ? 'font-bold text-white'\n                            : 'font-normal text-white/40'\n                        }`}\n                      >\n                        <option value=\"\" className=\"bg-black text-white/40\" disabled>\n                          Enter your blood group\n                        </option>\n                        {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((bg) => (\n                          <option key={bg} value={bg} className=\"bg-black text-white\">\n                            {bg}\n                          </option>\n                        ))}\n                      </select>\n                    </div>\n                  </div>\n\n                  {/* EMERGENCY GUARDIANS */}\n                  <div className=\"mt-10 space-y-6\">\n                    <h3 className=\"text-sm font-black uppercase tracking-[0.3em] text-cyber-orange flex items-center gap-2\">\n                      <ShieldAlert className=\"w-4 h-4\" /> Emergency Guardians (Automated Accident SOS Dispatches)\n                    </h3>\n                    <div className=\"grid grid-cols-1 md:grid-cols-2 gap-6\">\n                      {[1, 2].map((num) => (\n                        <div key={num} className=\"glass-panel p-6 border-white/10 bg-white/[0.02]\">\n                          <p className=\"text-[10px] font-black uppercase tracking-widest text-white/40 mb-4 flex items-center gap-2\">\n                            <ShieldAlert className=\"w-3.5 h-3.5 text-cyber-orange\" /> Guardian Node 0{num}\n                          </p>\n                          <div className=\"space-y-4\">\n                            <div>\n                              <input\n                                placeholder=\"Guardian Full Name\"\n                                value={profile?.[`emergencyContact${num}`]?.name || ''}\n                                onChange={(e) => handleTextChange(e.target.value, `emergencyContact${num}`, 'name')}\n                                className=\"w-full bg-black/50 border border-white/10 p-3 rounded-xl text-xs font-bold text-white focus:border-cyber-blue\"\n                              />\n                            </div>\n                            <div>\n                              <input\n                                placeholder=\"Guardian Contact (Phone)\"\n                                type=\"tel\"\n                                value={profile?.[`emergencyContact${num}`]?.phone || ''}\n                                onChange={(e) => handleTextChange(e.target.value, `emergencyContact${num}`, 'phone')}\n                                className=\"w-full bg-black/50 border border-white/10 p-3 rounded-xl text-xs font-bold text-white focus:border-cyber-blue\"\n                              />\n                            </div>\n                          </div>\n                        </div>\n                      ))}\n                    </div>\n                  </div>\n\n                  {/* AUTOMATION TOGGLES */}\n                  <div className=\"mt-8 pt-8 border-t border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-4\">\n                    <label className=\"flex items-center justify-between p-4 bg-white/5 rounded-2xl cursor-pointer hover:bg-white/[0.08] transition-colors\">\n                      <div>\n                        <p className=\"text-xs font-bold text-white\">Auto-Report Critical Accidents</p>\n                        <p className=\"text-[9px] text-white/40\">Immediately dispatch GPS to 108 / Emergency Nodes</p>\n                      </div>\n                      <input\n                        type=\"checkbox\"\n                        checked={profile?.autoReport ?? true}\n                        onChange={(e) => handleTextChange(e.target.checked, 'autoReport')}\n                        className=\"w-5 h-5 accent-cyber-blue rounded\"\n                      />\n                    </label>\n\n                    <label className=\"flex items-center justify-between p-4 bg-white/5 rounded-2xl cursor-pointer hover:bg-white/[0.08] transition-colors\">\n                      <div>\n                        <p className=\"text-xs font-bold text-white\">Guardian SMS Notifications</p>\n                        <p className=\"text-[9px] text-white/40\">Broadcast telemetry and maps link upon collision</p>\n                      </div>\n                      <input\n                        type=\"checkbox\"\n                        checked={profile?.guardianNotifications ?? true}\n                        onChange={(e) => handleTextChange(e.target.checked, 'guardianNotifications')}\n                        className=\"w-5 h-5 accent-cyber-blue rounded\"\n                      />\n                    </label>\n                  </div>\n\n                  {/* COMMIT BUTTON (DISAPPEARS ONCE COMMITTED) */}\n                  {isDirty && (\n                    <div className=\"mt-8 flex justify-end\">\n                      <button\n                        onClick={saveProfile}\n                        disabled={isSaving}\n                        className=\"px-10 py-4 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-[0.25em] rounded-2xl shadow-[0_0_30px_#FF6B35] hover:scale-105 active:scale-95 transition-all flex items-center gap-3 disabled:opacity-50\"\n                      >\n                        {isSaving ? <RefreshCcw className=\"w-5 h-5 animate-spin\" /> : <Save className=\"w-5 h-5\" />}\n                        Commit Identification Changes\n                      </button>\n                    </div>\n                  )}\n\n                  {showSuccess && !isDirty && (\n                    <motion.div\n                      initial={{ opacity: 0, y: 10 }}\n                      animate={{ opacity: 1, y: 0 }}\n                      className=\"mt-8 p-4 bg-cyber-green/10 border border-cyber-green/30 rounded-2xl flex items-center gap-3 text-cyber-green\"\n                    >\n                      <CheckCircle className=\"w-5 h-5 shrink-0\" />\n                      <div>\n                        <p className=\"text-xs font-bold uppercase tracking-wider\">\n                          Profile Changes Committed Successfully\n                        </p>\n                        <p className=\"text-[10px] text-white/50\">\n                          Your identity and emergency link contacts are saved securely in Firestore.\n                        </p>\n                      </div>\n                    </motion.div>\n                  )}\n                </div>\n              </motion.div>\n            )}\n\n            {/* 2. MANUAL DATASET MANAGEMENT (RTO DATABASE) */}\n            {activeCategory === 'dataset' && (\n              <motion.div\n                key=\"dataset\"\n                initial={{ opacity: 0, x: 20 }}\n                animate={{ opacity: 1, x: 0 }}\n                exit={{ opacity: 0, x: -20 }}\n                className=\"space-y-8\"\n              >\n                <div className=\"glass-panel p-6 sm:p-8 border-white/10\">\n                  <div className=\"flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8\">\n                    <div className=\"flex items-center gap-4\">\n                      <div className=\"p-4 bg-cyber-green/10 rounded-2xl border border-cyber-green/20\">\n                        <Database className=\"w-8 h-8 text-cyber-green\" />\n                      </div>\n                      <div>\n                        <h2 className=\"text-2xl font-display font-black text-white\">MANUAL DATASET MANAGEMENT</h2>\n                        <p className=\"text-[10px] font-mono text-white/40 uppercase tracking-[0.25em]\">\n                          RTO Vehicle Registry â¢ {rtoVehicleCount} Registered Nodes Active\n                        </p>\n                      </div>\n                    </div>\n\n                    <div className=\"flex items-center gap-3\">\n                      <button\n                        onClick={handleSeedRTO}\n                        disabled={isSeeding}\n                        className=\"px-5 py-3 bg-cyber-green text-black font-display font-black text-xs uppercase tracking-wider rounded-xl shadow-[0_0_20px_rgba(0,255,157,0.4)] hover:scale-105 transition-all flex items-center gap-2 disabled:opacity-50\"\n                      >\n                        <RefreshCcw className={`w-4 h-4 ${isSeeding ? 'animate-spin' : ''}`} />\n                        {isSeeding ? 'Verifying...' : 'Seed Sample RTO Dataset'}\n                      </button>\n                    </div>\n                  </div>\n\n                  {datasetMessage && (\n                    <div className=\"mb-6 p-4 bg-cyber-blue/10 border border-cyber-blue/30 rounded-2xl text-cyber-blue text-xs font-bold flex items-center justify-between\">\n                      <span>{datasetMessage}</span>\n                      <button onClick={() => setDatasetMessage(null)} className=\"text-white/60 hover:text-white\">\n                        Dismiss\n                      </button>\n                    </div>\n                  )}\n\n                  {/* DATASET ACTIONS GRID */}\n                  <div className=\"grid grid-cols-1 md:grid-cols-2 gap-6 mb-8\">\n                    {/* Export */}\n                    <div className=\"p-6 bg-white/5 border border-white/10 rounded-2xl space-y-4\">\n                      <div className=\"flex items-center gap-3\">\n                        <Download className=\"w-5 h-5 text-cyber-blue\" />\n                        <h3 className=\"text-sm font-bold uppercase tracking-wider text-white\">\n                          Export Central Registry\n                        </h3>\n                      </div>\n                      <p className=\"text-[11px] text-white/50 leading-relaxed\">\n                        Download the entire collection of verified RTO vehicle records for backups, offline law enforcement, or reporting.\n                      </p>\n                      <div className=\"flex gap-3 pt-2\">\n                        <button\n                          onClick={() => handleExportRTO('csv')}\n                          className=\"px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2\"\n                        >\n                          <FileSpreadsheet className=\"w-4 h-4\" /> Download .CSV\n                        </button>\n                        <button\n                          onClick={() => handleExportRTO('json')}\n                          className=\"px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2\"\n                        >\n                          <Layers className=\"w-4 h-4\" /> Download .JSON\n                        </button>\n                      </div>\n                    </div>\n\n                    {/* Import */}\n                    <div className=\"p-6 bg-white/5 border border-white/10 rounded-2xl space-y-4\">\n                      <div className=\"flex items-center gap-3\">\n                        <Upload className=\"w-5 h-5 text-cyber-purple\" />\n                        <h3 className=\"text-sm font-bold uppercase tracking-wider text-white\">\n                          Batch Import CSV Dataset\n                        </h3>\n                      </div>\n                      <p className=\"text-[11px] text-white/50 leading-relaxed\">\n                        Upload custom bulk CSV dataset with columns (registrationNumber, ownerName, ownerPhone, vehicleType, makeModel, status).\n                      </p>\n                      <div className=\"pt-2\">\n                        <label className=\"px-5 py-2.5 bg-cyber-purple/20 border border-cyber-purple/40 hover:bg-cyber-purple hover:text-black text-cyber-purple rounded-xl text-xs font-bold cursor-pointer transition-all inline-flex items-center gap-2\">\n                          <Upload className=\"w-4 h-4\" /> Select CSV File\n                          <input type=\"file\" accept=\".csv\" onChange={handleCSVUpload} className=\"hidden\" />\n                        </label>\n                      </div>\n                    </div>\n                  </div>\n\n                  {/* QUICK RTO SCRATCHPAD LOOKUP */}\n                  <div className=\"p-6 bg-black/40 border border-white/10 rounded-2xl space-y-4\">\n                    <h3 className=\"text-sm font-black uppercase tracking-wider text-cyber-blue flex items-center gap-2\">\n                      <Search className=\"w-4 h-4\" /> Live RTO Database Verification Scratchpad\n                    </h3>\n                    <p className=\"text-[11px] text-white/40\">\n                      Test any plate number (e.g. <span className=\"text-white font-mono\">KA-01-HH-1234</span>,{' '}\n                      <span className=\"text-white font-mono\">DL-03-CC-9988</span>,{' '}\n                      <span className=\"text-white font-mono\">KA-05-MN-4521</span>) to inspect live RTO verification output.\n                    </p>\n\n                    <form onSubmit={handleTestLookup} className=\"flex gap-3\">\n                      <input\n                        type=\"text\"\n                        placeholder=\"Enter Plate Number...\"\n                        value={testPlateQuery}\n                        onChange={(e) => setTestPlateQuery(e.target.value.toUpperCase())}\n                        className=\"flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs uppercase font-bold text-white focus:border-cyber-blue\"\n                      />\n                      <button\n                        type=\"submit\"\n                        className=\"px-6 py-3 bg-cyber-blue text-black font-display font-black text-xs uppercase tracking-wider rounded-xl\"\n                      >\n                        Verify Record\n                      </button>\n                    </form>\n\n                    {testPlateResult && (\n                      <div className=\"mt-4 p-4 rounded-xl border\">\n                        {testPlateResult === 'NOT_FOUND' ? (\n                          <div className=\"flex items-center gap-3 text-cyber-red\">\n                            <AlertTriangle className=\"w-5 h-5 shrink-0\" />\n                            <div>\n                              <p className=\"text-xs font-bold uppercase\">NO RECORD FOUND IN RTO DATABASE</p>\n                              <p className=\"text-[10px] text-white/50\">\n                                This vehicle plate is unregistered, counterfeit, or missing from central RTO records.\n                              </p>\n                            </div>\n                          </div>\n                        ) : (\n                          <div className=\"space-y-2 text-xs\">\n                            <div className=\"flex items-center justify-between\">\n                              <span className=\"font-display font-black text-cyber-green text-base\">\n                                {testPlateResult.registrationNumber}\n                              </span>\n                              <span className=\"px-2 py-0.5 bg-cyber-green/20 text-cyber-green rounded text-[9px] font-black uppercase\">\n                                {testPlateResult.status}\n                              </span>\n                            </div>\n                            <div className=\"grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-2 border-t border-white/10\">\n                              <div>\n                                <span className=\"text-white/40 block text-[9px]\">Owner:</span>\n                                <span className=\"text-white font-bold\">{testPlateResult.ownerName}</span>\n                              </div>\n                              <div>\n                                <span className=\"text-white/40 block text-[9px]\">Make/Model:</span>\n                                <span className=\"text-white\">{testPlateResult.makeModel}</span>\n                              </div>\n                              <div>\n                                <span className=\"text-white/40 block text-[9px]\">Contact:</span>\n                                <span className=\"text-white font-mono\">{testPlateResult.ownerPhone}</span>\n                              </div>\n                              <div>\n                                <span className=\"text-white/40 block text-[9px]\">RTO Zone:</span>\n                                <span className=\"text-white\">{testPlateResult.rtoZone}</span>\n                              </div>\n                            </div>\n                          </div>\n                        )}\n                      </div>\n                    )}\n                  </div>\n                </div>\n              </motion.div>\n            )}\n\n            {/* 3. HARDWARE & BLE MODULES - Feature 6: Simplified, only first module */}\n            {activeCategory === 'hardware' && (\n              <motion.div\n                key=\"hardware\"\n                initial={{ opacity: 0, x: 20 }}\n                animate={{ opacity: 1, x: 0 }}\n                exit={{ opacity: 0, x: -20 }}\n                className=\"space-y-8\"\n              >\n                <div className=\"glass-panel p-6 sm:p-8 border-white/10 relative overflow-hidden\">\n                  <div className=\"flex flex-col md:flex-row justify-between gap-6 mb-8\">\n                    <div>\n                      <h2 className=\"text-2xl font-display font-black tracking-tight text-white\">\n                        HARDWARE & SENTRY BRIDGE\n                      </h2>\n                      <p className=\"text-[10px] font-mono text-white/40 uppercase tracking-[0.25em]\">\n                        Pair with ESP32-CAM or BLE Helmet Microcontroller\n                      </p>\n                    </div>\n                    <button\n                      onClick={startDiscovery}\n                      className=\"px-6 py-3 bg-white/5 border border-white/10 hover:bg-cyber-blue hover:text-black rounded-xl text-xs font-black uppercase tracking-wider transition-all\"\n                    >\n                      Scan BLE / WiFi Devices\n                    </button>\n                  </div>\n\n                  {/* ESP32-CAM stream config (single active stream is shown in Dashboard main view) */}\n                  <div className=\"mb-8 p-6 bg-white/5 border border-white/10 rounded-2xl space-y-4\">\n                    <label className=\"text-xs font-bold text-white block uppercase tracking-wider\">\n                      ESP32-CAM Live Stream (SmartHelmet_AP)\n                    </label>\n                    <div className=\"space-y-1 text-[11px] text-white/60\">\n                      <p><span className=\"text-white/80 font-semibold\">WiFi:</span> connect to <span className=\"font-mono text-white\">SmartHelmet_AP</span> (password <span className=\"font-mono text-white\">12345678</span>, 2.4&nbsp;GHz, channel&nbsp;1, max 4 devices). Some devices do not support 2.4&nbsp;GHz.</p>\n                      <p><span className=\"text-white/80 font-semibold\">Camera:</span> stream URL <span className=\"font-mono text-white\">http://192.168.4.1/stream</span> (host <span className=\"font-mono text-white\">192.168.4.1</span> must be reachable).</p>\n                      <p className=\"text-white/40\">The live MJPEG stream is rendered in the <span className=\"text-white/70\">Dashboard main camera view</span> (single active request) to avoid buffering from duplicate connections. This panel does not open a second stream. If the app is opened over HTTPS, the browser may block the local HTTP stream (mixed content) even when WiFi is connected.</p>\n                    </div>\n                    <div className=\"flex flex-col sm:flex-row gap-3\">\n                      <input\n                        type=\"text\"\n                        value={esp32StreamUrl}\n                        onChange={(e) => setEsp32StreamUrl(e.target.value)}\n                        placeholder=\"http://192.168.4.1/stream\"\n                        className=\"flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-mono focus:border-cyber-blue\"\n                      />\n                    </div>\n                    <p className=\"text-[10px] text-white/40\">To view/connect the stream with status and reachability checks, use the Dashboard → ESP32-CAM card and Connect (shows in the main camera slot). A disconnected/unreachable WiFi (192.168.4.1) is reported separately from an unavailable camera stream.</p>\n                  </div>\n\n                  {/* Feature 6: Only show first module - simplified */}\n                  {wifiStatus === 'scanning' && (\n                    <div className=\"space-y-4\">\n                      <div className=\"flex items-center gap-3 text-cyber-blue\">\n                        <RefreshCcw className=\"w-4 h-4 animate-spin\" />\n                        <span className=\"text-xs font-black tracking-wider uppercase\">\n                          Verifying Bluetooth Low Energy & WiFi nodes...\n                        </span>\n                      </div>\n                      <div className=\"grid grid-cols-1 md:grid-cols-2 gap-4\">\n                        {foundModules.filter((_, idx) => idx === 0).map((m) => (\n                          <div\n                            key={m.id}\n                            onClick={() => confirmConnection()}\n                            className=\"p-5 bg-white/5 border border-white/5 rounded-2xl cursor-pointer hover:border-cyber-blue/40 hover:bg-cyber-blue/5 transition-all\"\n                          >\n                            <div className=\"flex items-center justify-between mb-2\">\n                              <span className=\"text-sm font-bold text-white\">{m.name}</span>\n                              <Zap className=\"w-4 h-4 text-cyber-blue\" />\n                            </div>\n                            <p className=\"text-[10px] font-mono text-white/40 uppercase\">\n                              ID: {m.id} â¢ Signal: {m.signal} dBm\n                            </p>\n                          </div>\n                        ))}\n                      </div>\n                    </div>\n                  )}\n\n                  {wifiStatus === 'connected' && (\n                    <div className=\"bg-cyber-green/5 border border-cyber-green/20 rounded-3xl p-8 flex flex-col items-center gap-4 text-center\">\n                      <div className=\"w-16 h-16 rounded-full border-2 border-cyber-green flex items-center justify-center\">\n                        <CheckCircle className=\"w-8 h-8 text-cyber-green\" />\n                      </div>\n                      <div>\n                        <h3 className=\"text-xl font-display font-black uppercase text-cyber-green\">\n                          HELMET BRIDGE PAIRED\n                        </h3>\n                        <p className=\"text-[10px] font-mono text-white/50 uppercase mt-1\">\n                          IP: 192.168.4.1 â¢ CAMERA SENSOR: OV2640 HD\n                        </p>\n                      </div>\n                      <button\n                        onClick={() => setWifiStatus('disconnected')}\n                        className=\"px-4 py-1.5 text-xs text-cyber-red hover:underline\"\n                      >\n                        Disconnect Node\n                      </button>\n                    </div>\n                  )}\n\n                  {(!wifiStatus || wifiStatus === 'disconnected') && (\n                    <div className=\"py-12 text-center border border-dashed border-white/10 rounded-2xl text-white/30 text-xs uppercase\">\n                      No external BLE helmet hardware linked. Using internal browser web camera.\n                    </div>\n                  )}\n                </div>\n\n                {/* AI SENSITIVITY */}\n                <div className=\"glass-panel p-6 sm:p-8 border-white/10\">\n                  <h3 className=\"text-sm font-black uppercase tracking-[0.3em] mb-6 text-cyber-purple\">\n                    AI Vision Inference Sensitivity\n                  </h3>\n                  <div className=\"space-y-4\">\n                    <div className=\"flex justify-between items-center\">\n                      <span className=\"text-xs uppercase text-white/40 font-bold\">Confidence Threshold</span>\n                      <span className=\"text-xl font-display font-black text-cyber-blue\">{aiSensitivity}%</span>\n                    </div>\n                    <input\n                      type=\"range\"\n                      min=\"50\"\n                      max=\"99\"\n                      value={aiSensitivity}\n                      onChange={(e) => setAiSensitivity(parseInt(e.target.value))}\n                      className=\"w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-cyber-blue\"\n                    />\n                    <div className=\"flex justify-between text-[9px] font-mono uppercase text-white/30\">\n                      <span>Low Threshold (Faster)</span>\n                      <span>High Confidence (Strict)</span>\n                    </div>\n                  </div>\n                </div>\n              </motion.div>\n            )}\n\n            {/* 4. NETWORK & CLOUD ENGINE */}\n            {activeCategory === 'network' && (\n              <motion.div\n                key=\"network\"\n                initial={{ opacity: 0, x: 20 }}\n                animate={{ opacity: 1, x: 0 }}\n                exit={{ opacity: 0, x: -20 }}\n                className=\"space-y-8\"\n              >\n                <div className=\"glass-panel p-6 sm:p-8 border-white/10 space-y-6\">\n                  <div className=\"flex items-center gap-4\">\n                    <div className=\"p-4 bg-cyber-blue/10 rounded-2xl border border-cyber-blue/20\">\n                      <Globe className=\"w-8 h-8 text-cyber-blue\" />\n                    </div>\n                    <div>\n                      <h2 className=\"text-2xl font-display font-black text-white\">CLOUD ENGINE & PROTOCOLS</h2>\n                      <p className=\"text-[10px] font-mono text-white/40 uppercase tracking-[0.25em]\">\n                        Firebase Firestore â¢ Gemini 2.5 Flash Server Proxy\n                      </p>\n                    </div>\n                  </div>\n\n                  <div className=\"grid grid-cols-1 md:grid-cols-3 gap-4\">\n                    <div className=\"p-5 bg-white/5 border border-white/10 rounded-2xl\">\n                      <span className=\"text-[10px] font-black uppercase text-white/40 block mb-1\">Firestore Link</span>\n                      <p className=\"text-lg font-bold text-cyber-green flex items-center gap-2\">\n                        <CheckCircle className=\"w-4 h-4\" /> Connected\n                      </p>\n                      <p className=\"text-[9px] font-mono text-white/30 mt-2\">Realtime Listeners Active</p>\n                    </div>\n\n                    <div className=\"p-5 bg-white/5 border border-white/10 rounded-2xl\">\n                      <span className=\"text-[10px] font-black uppercase text-white/40 block mb-1\">AI Vision Route</span>\n                      <p className=\"text-lg font-bold text-cyber-blue flex items-center gap-2\">\n                        <Server className=\"w-4 h-4\" /> /api/analyze-helmet\n                      </p>\n                      <p className=\"text-[9px] font-mono text-white/30 mt-2\">Server-Side Gemini Model</p>\n                    </div>\n\n                    <div className=\"p-5 bg-white/5 border border-white/10 rounded-2xl\">\n                      <span className=\"text-[10px] font-black uppercase text-white/40 block mb-1\">Network Latency</span>\n                      <p className=\"text-lg font-bold text-cyber-purple flex items-center gap-2\">\n                        <Activity className=\"w-4 h-4\" /> 18 ms\n                      </p>\n                      <p className=\"text-[9px] font-mono text-white/30 mt-2\">Google Cloud Run Region</p>\n                    </div>\n                  </div>\n                </div>\n              </motion.div>\n            )}\n\n            {/* 5. EXECUTIVE PROTOCOLS / BILLING */}\n            {activeCategory === 'billing' && (\n              <motion.div\n                key=\"billing\"\n                initial={{ opacity: 0, x: 20 }}\n                animate={{ opacity: 1, x: 0 }}\n                exit={{ opacity: 0, x: -20 }}\n                className=\"space-y-8\"\n              >\n                <div className=\"grid grid-cols-1 md:grid-cols-2 gap-8\">\n                  <div className=\"glass-panel p-8 border-white/10 bg-white/[0.01] flex flex-col justify-between\">\n                    <div>\n                      <p className=\"text-[10px] font-black uppercase tracking-widest text-white/40 mb-4\">\n                        Current Protocol Tier\n                      </p>\n                      <h3 className=\"text-4xl font-display font-black tracking-tight mb-2 text-white\">STANDARD CITIZEN</h3>\n                      <p className=\"text-xs text-white/50 leading-relaxed\">\n                        Access to live HUD, incident detection, real-time RTO lookups, and automated SOS emergency dispatches.\n                      </p>\n                    </div>\n                    <div className=\"pt-8 text-[10px] font-black text-cyber-green uppercase tracking-widest\">\n                      Active License â¢ Perpetual\n                    </div>\n                  </div>\n\n                  <div className=\"glass-panel p-8 border-cyber-purple/40 bg-cyber-purple/5 relative overflow-hidden\">\n                    <div className=\"absolute top-0 right-0 p-6\">\n                      <Zap className=\"w-10 h-10 text-cyber-purple animate-pulse\" />\n                    </div>\n                    <div>\n                      <span className=\"px-3 py-1 bg-cyber-purple text-black text-[9px] font-black uppercase tracking-widest rounded-full\">\n                        LAW ENFORCEMENT\n                      </span>\n                      <h3 className=\"text-4xl font-display font-black tracking-tight mt-4 mb-2 text-cyber-purple\">\n                        RTO AUTHORITY\n                      </h3>\n                      <div className=\"space-y-3 mt-6\">\n                        {[\n                          'Automated e-Challan Endorsement',\n                          'Direct Police Radio SOS Broadcast',\n                          'Multi-Camera ALPR Highway Stream',\n                          'Central RTO Bulk Dataset Synchronization',\n                        ].map((f) => (\n                          <div key={f} className=\"flex items-center gap-3 text-xs font-bold text-white/80\">\n                            <CheckCircle className=\"w-4 h-4 text-cyber-purple shrink-0\" /> {f}\n                          </div>\n                        ))}\n                      </div>\n                    </div>\n                  </div>\n                </div>\n              </motion.div>\n            )}\n          </AnimatePresence>\n        </div>\n      </div>\n    </div>\n  );\n}\n","ok":true}
+import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  Gauge,
+  Activity,
+  Phone,
+  Camera,
+  CameraOff,
+  ShieldAlert,
+  Plus,
+  Trash2,
+  Heart,
+  AlertOctagon,
+  AlertTriangle,
+  User,
+  Crosshair,
+  Radio,
+  Wifi,
+  WifiOff,
+  CheckCircle,
+  X,
+  Car,
+  Signal,
+  Grid3x3,
+  Palette,
+  ChevronDown,
+  Moon,
+  Sun,
+  Sparkles,
+  Pencil,
+  Check,
+  ChevronUp,
+  LogOut,
+  Users,
+  Bell,
+  Settings,
+  LogIn,
+  BarChart3,
+  FileText,
+  Download,
+  Eye,
+  Monitor,
+  Bot,
+  Shield,
+  Database,
+  LayoutDashboard,
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import * as Dialog from '@radix-ui/react-dialog';
+import type * as cocoSsd from '@tensorflow-models/coco-ssd';
+import { saveViolation, getAllViolations, deleteViolation, updateViolation, ViolationRecord } from '../utils/violationStorage';
+import {
+  toDetectedLabel,
+  isVehicleClass,
+  VEHICLE_SUBTYPE_LIMITATION,
+  classifyVehicle,
+  loadDedicatedModel,
+  classifyRegionsWithDedicatedModel,
+  type VehicleVerdict,
+  type VehicleSubtype,
+} from '../utils/vehicleClassification';
+import {
+  DEFAULT_VERIFICATION_CONFIG,
+  verifyCandidate,
+  VerificationTracker,
+  TWO_WHEELER_CLASSES,
+  type Box,
+} from '../utils/violationVerification';
+
+interface EmergencyContact {
+  id: string;
+  name: string;
+  phone: string;
+  type: 'police' | 'ambulance' | 'personal' | 'fire';
+}
+
+interface SavedContact {
+  id: string;
+  name: string;
+  phone: string;
+}
+
+interface DetectedVehicle {
+  id: string;
+  plate: string;
+  distance: number;
+  speed: number;
+  type: string;
+}
+
+const DEFAULT_EMERGENCY_CONTACTS: EmergencyContact[] = [
+  { id: 'police', name: 'Traffic Police', phone: '100', type: 'police' },
+  { id: 'ambulance', name: 'Ambulance', phone: '102', type: 'ambulance' },
+  { id: 'fire', name: 'Fire & Rescue', phone: '101', type: 'fire' },
+  { id: 'emergency', name: 'National Emergency', phone: '112', type: 'police' },
+];
+
+export default function DashboardView({ userName, userPhoto, onViewChange, onSignOut, onLogin }: {
+  userName?: string;
+  userPhoto?: string;
+  onViewChange?: (view: 'dashboard' | 'violations' | 'authority' | 'profile' | 'settings') => void;
+  onSignOut?: () => void;
+  onLogin?: () => void;
+}) {
+  // Speedometer state
+  const [speedKmh, setSpeedKmh] = useState(0);
+  const [speedHistory, setSpeedHistory] = useState<number[]>([]);
+
+
+  const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
+    gauge: Gauge, alert: AlertTriangle, layout: LayoutDashboard, chart: BarChart3,
+    file: FileText, bell: Bell, users: Users, car: Car, bot: Bot,
+    monitor: Monitor, settings: Settings, database: Database, shield: Shield,
+  };
+
+  const THEMES = [
+    { id: 'cyber', name: 'AEGIS Dark', icon: Moon, color: 'text-cyber-blue' },
+    { id: 'sunset', name: 'Orange Glow', icon: Sun, color: 'text-cyber-orange' },
+    { id: 'aurora', name: 'Midnight', icon: Sparkles, color: 'text-cyber-purple' },
+    { id: 'ocean', name: 'High Contrast', icon: Palette, color: 'text-cyber-green' },
+  ];
+
+  const AVATAR_COLORS = ['bg-pink-500', 'bg-purple-500', 'bg-blue-500', 'bg-green-500', 'bg-orange-500', 'bg-red-500', 'bg-teal-500', 'bg-indigo-500'];
+  const getAvatarColor = (name: string) => AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length];
+  const getIcon = (iconName: string) => ICON_MAP[iconName] || Gauge;
+
+  // ESP32-CAM state
+  const [esp32Connected, setEsp32Connected] = useState(false);
+  const [esp32StreamUrl, setEsp32StreamUrl] = useState('http://192.168.4.1/stream');
+  const [esp32Data, setEsp32Data] = useState<{ speed: number; persons: number; plates: string[] } | null>(null);
+  // ESP32 stream health/reconnect (single persistent <img> in main slot).
+  // Bounded exponential backoff only on actual disconnect/error; never on resize/rotate.
+  const esp32ImgRef = useRef<HTMLImageElement>(null);
+  const [esp32StreamStatus, setEsp32StreamStatus] = useState<'idle' | 'connecting' | 'live' | 'error'>('idle');
+  const [esp32StreamError, setEsp32StreamError] = useState<string | null>(null);
+  const [esp32Reachable, setEsp32Reachable] = useState<boolean | null>(null);
+  const [esp32StreamNonce, setEsp32StreamNonce] = useState(0);
+  const esp32ReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const esp32ReconnectAttemptRef = useRef(0);
+  const esp32ReconnectInFlightRef = useRef(false);
+  const [esp32MeasuredFps, setEsp32MeasuredFps] = useState<number | null>(null);
+  const esp32FpsSamplesRef = useRef<number[]>([]);
+
+  // --- ESP32 reachability & stream reconnect (bounded, no parallel attempts) ---
+  const checkEsp32Reachable = useCallback(async (timeoutMs = 2500): Promise<boolean> => {
+    // Probe the host (not the MJPEG stream itself) to distinguish "WiFi/AP unreachable"
+    // from "stream endpoint unavailable". Uses no-cors fetch so a reachable host that
+    // doesn't answer CORS still resolves (opaque) instead of throwing.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      await fetch('http://192.168.4.1/', { mode: 'no-cors', cache: 'no-store', signal: ctrl.signal });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }, []);
+
+  const clearEsp32Reconnect = useCallback(() => {
+    if (esp32ReconnectTimerRef.current) { clearTimeout(esp32ReconnectTimerRef.current); esp32ReconnectTimerRef.current = null; }
+    esp32ReconnectInFlightRef.current = false;
+  }, []);
+
+  const scheduleEsp32Reconnect = useCallback((reason: string) => {
+    if (!esp32Connected) return;
+    if (esp32ReconnectInFlightRef.current) return; // prevent simultaneous attempts
+    const attempt = esp32ReconnectAttemptRef.current;
+    // Bounded exponential backoff: 1s, 2s, 4s, 8s, max 15s, cap attempts at 8
+    if (attempt >= 8) {
+      setEsp32StreamStatus('error');
+      setEsp32StreamError(reason + ' (stopped retrying after several attempts)');
+      return;
+    }
+    const delay = Math.min(15000, 1000 * Math.pow(2, attempt));
+    esp32ReconnectInFlightRef.current = true;
+    esp32ReconnectAttemptRef.current = attempt + 1;
+    setEsp32StreamStatus('error');
+    setEsp32StreamError(reason + ` — retrying in ${Math.round(delay/1000)}s…`);
+    esp32ReconnectTimerRef.current = setTimeout(async () => {
+      esp32ReconnectInFlightRef.current = false;
+      if (!esp32Connected) return;
+      const ok = await checkEsp32Reachable(2500);
+      setEsp32Reachable(ok);
+      if (!ok) {
+        setEsp32StreamError('Cannot reach 192.168.4.1. Connect to WiFi "SmartHelmet_AP" (password 12345678, 2.4 GHz) then retry.');
+        scheduleEsp32Reconnect('ESP32 access point unreachable');
+        return;
+      }
+      // Actual reconnect: bump nonce so the single <img> requests the stream once.
+      setEsp32StreamStatus('connecting');
+      setEsp32StreamError(null);
+      setEsp32StreamNonce(n => n + 1);
+    }, delay);
+  }, [esp32Connected, checkEsp32Reachable]);
+
+  // When user connects/disconnects ESP32, (re)probe and (re)start/stop stream once.
+  useEffect(() => {
+    if (!esp32Connected) {
+      clearEsp32Reconnect();
+      esp32ReconnectAttemptRef.current = 0;
+      setEsp32StreamStatus('idle');
+      setEsp32StreamError(null);
+      setEsp32Reachable(null);
+      setEsp32MeasuredFps(null);
+      esp32FpsSamplesRef.current = [];
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setEsp32StreamStatus('connecting');
+      setEsp32StreamError(null);
+      esp32ReconnectAttemptRef.current = 0;
+      const ok = await checkEsp32Reachable(3000);
+      if (cancelled) return;
+      setEsp32Reachable(ok);
+      if (!ok) {
+        setEsp32StreamError('Cannot reach 192.168.4.1. Join WiFi "SmartHelmet_AP" (password 12345678, 2.4 GHz, ch 1).');
+        scheduleEsp32Reconnect('ESP32 access point unreachable');
+        return;
+      }
+      // Start stream once (single persistent <img> picks this up).
+      setEsp32StreamNonce(n => n + 1);
+    })();
+    return () => { cancelled = true; clearEsp32Reconnect(); };
+  }, [esp32Connected, esp32StreamUrl]);
+
+  // Cleanup on unmount
+  useEffect(() => () => { clearEsp32Reconnect(); }, [clearEsp32Reconnect]);
+
+  // Person detection state
+  const [detectedPersons, setDetectedPersons] = useState<string[]>([]);
+  const [capturedImages, setCapturedImages] = useState<string[]>([]);
+  const [evidenceViolations, setEvidenceViolations] = useState<{ id: string; url: string; label: string; record: ViolationRecord }[]>([]);
+  const [storageError, setStorageError] = useState<string | null>(null);
+
+  // Load existing evidence from IndexedDB on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const records = await getAllViolations();
+      if (cancelled) return;
+      const items = records.map((r) => ({ id: r.id, url: URL.createObjectURL(r.blob), label: r.type, record: r }));
+      setEvidenceViolations(items);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // GPS state
+  const [gpsStatus, setGpsStatus] = useState<'searching' | 'locked' | 'denied' | 'unavailable'>('searching');
+  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [satellites, setSatellites] = useState(0);
+  const [gpsAccuracy, setGpsAccuracy] = useState(0);
+  const [gpsAltitude, setGpsAltitude] = useState<number | null>(null);
+  const [gpsHeading, setGpsHeading] = useState<number | null>(null);
+  const [gpsSpeed, setGpsSpeed] = useState(0);
+  const [gpsSignalWeak, setGpsSignalWeak] = useState(false);
+  const lastGpsFixAtRef = useRef(0);
+  const lastPosRef = useRef<{ lat: number; lng: number; t: number } | null>(null);
+
+  // Webcam state
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [isWebcamActive, setIsWebcamActive] = useState(false);
+  const [webcamError, setWebcamError] = useState<string | null>(null);
+  const [detectionActive, setDetectionActive] = useState(false);
+  const [detectedObjects, setDetectedObjects] = useState<string[]>([]);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [detectionConfidence, setDetectionConfidence] = useState(0);
+  const detectCanvasRef = useRef<HTMLCanvasElement>(null);
+  const modelRef = useRef<cocoSsd.ObjectDetection | null>(null);
+  const [modelReady, setModelReady] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const lastPredictionsRef = useRef<cocoSsd.DetectedObject[]>([]);
+  const lastClassesRef = useRef<string>('');
+  const lastInferRef = useRef(0);
+  // Throttles the automatic-capture candidate check (ms since last frame).
+  const lastAutoCaptureCheckRef = useRef(0);
+  // Latest live values, so the capture path never reads a stale render
+  // (the detection loop intentionally keeps a stable effect closure).
+  const liveCaptureCtxRef = useRef({
+    speedKmh: 0,
+    gpsStatus: 'searching' as 'searching' | 'locked' | 'denied' | 'unavailable',
+    gpsCoords: null as { lat: number; lng: number } | null,
+    detectedObjects: [] as string[],
+  });
+  liveCaptureCtxRef.current = { speedKmh, gpsStatus, gpsCoords, detectedObjects };
+
+  // Indian-vehicle classification:
+  //  - dedicatedModelRef holds trained weights if they exist at
+  //    models/indian_vehicle/model.json (verified subclass).
+  //  - lastVerdictsRef holds the latest per-detection verdicts.
+  // Both are non-blocking: with no weights the app keeps using COCO-SSD.
+  const dedicatedModelRef = useRef<import('../utils/vehicleClassification').DedicatedVehicleModel | null>(null);
+  const [dedicatedModelActive, setDedicatedModelActive] = useState(false);
+  const lastVerdictsRef = useRef<VehicleVerdict[]>([]);
+  const dedicatedResultsRef = useRef<Array<{ subtype: VehicleSubtype; score: number } | null>>([]);
+  const lastDedicatedInferRef = useRef(0);
+  const rafRef = useRef(0);
+  // Try to load trained Indian-vehicle weights in the background.
+  // Absent weights are the normal case: we simply keep using COCO-SSD.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const m = await loadDedicatedModel();
+      if (cancelled) return;
+      dedicatedModelRef.current = m;
+      setDedicatedModelActive(!!m);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
+  // Desired camera (single source of truth). The UI and the acquisition logic
+  // both read from here, so they can never disagree.
+  const facingModeRef = useRef<'user' | 'environment'>('environment');
+  // Mutex: only one camera operation runs at a time.
+  const switchBusyRef = useRef(false);
+  // A click that arrived while a switch was in flight.
+  const switchPendingRef = useRef(false);
+  // Generation token: a slow response from an older request is discarded
+  // instead of overwriting a newer selection.
+  const cameraGenRef = useRef(0);
+  // Last camera that actually produced frames, used to restore on failure.
+  const lastGoodRef = useRef<{ facing: 'user' | 'environment'; deviceId: string | null } | null>(null);
+  // Read by the detection loop so it pauses while the source is switching.
+  const cameraSwitchingRef = useRef(false);
+  const [switchingCamera, setSwitchingCamera] = useState(false);
+  facingModeRef.current = facingMode;
+
+  // Violation verification (cross-checking pipeline).
+  // Single source of truth for candidate evaluation + temporal
+  // consistency + de-dup. Configurable thresholds live in
+  // violationVerification.ts (DEFAULT_VERIFICATION_CONFIG).
+  const verificationRef = useRef(new VerificationTracker(DEFAULT_VERIFICATION_CONFIG));
+  const [captureResult, setCaptureResult] = useState<{
+    status: 'confirmed' | 'unverified' | 'rejected';
+    violationType: string | null;
+    reasons: string[];
+  } | null>(null);
+  const captureResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guards against overlapping manual + automatic captures writing twice.
+  const autoCaptureInFlightRef = useRef(false);
+
+  // Evidence management: view details, edit metadata, human review, delete.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [viewingEvidence, setViewingEvidence] = useState<ViolationRecord | null>(null);
+  const [editingEvidence, setEditingEvidence] = useState<{
+    id: string;
+    type: string;
+    verificationStatus: 'confirmed' | 'unverified';
+    speed: string;
+    objects: string;
+    reviewStatus: 'pending' | 'approved' | 'rejected';
+    reviewNote: string;
+  } | null>(null);
+
+  /** Patch one record inside the gallery state (keeps UI + IndexedDB in sync). */
+  const patchEvidenceInState = (id: string, patch: Partial<ViolationRecord>) => {
+    setEvidenceViolations(prev =>
+      prev.map((x) =>
+        x.id === id
+          ? { ...x, label: patch.type ?? x.label, record: { ...x.record, ...patch } }
+          : x
+      )
+    );
+    // Keep the open "view details" modal in sync with the edit.
+    setViewingEvidence(prev => (prev && prev.id === id ? { ...prev, ...patch } : prev));
+  };
+
+  const downloadEvidence = (v: { id: string; url: string; record: ViolationRecord }) => {
+    // Prefer the stored Blob so the download still works even if the
+    // cached object URL was revoked; fall back to the object URL.
+    const href = v.record.blob ? URL.createObjectURL(v.record.blob) : v.url;
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = `aegis-evidence-${v.record.createdAt}-${v.id}.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    if (v.record.blob) setTimeout(() => URL.revokeObjectURL(href), 2000);
+  };
+
+  /** Cached object URL for a stored record, or undefined if it is gone. */
+  const evidenceUrlFor = (id: string) => evidenceViolations.find((x) => x.id === id)?.url;
+
+  const openEditEvidence = (record: ViolationRecord) => {
+    setEditingEvidence({
+      id: record.id,
+      type: record.type,
+      verificationStatus: record.verificationStatus || 'unverified',
+      speed: record.speed != null ? String(record.speed) : '',
+      objects: record.objects || '',
+      reviewStatus: record.reviewStatus || 'pending',
+      reviewNote: record.reviewNote || '',
+    });
+  };
+
+  const saveEvidenceEdit = async () => {
+    if (!editingEvidence) return;
+    const trimmedSpeed = editingEvidence.speed.trim();
+    const parsedSpeed = Number(trimmedSpeed);
+    const speedValid = trimmedSpeed !== '' && Number.isFinite(parsedSpeed);
+    // Only include speed when the user entered a valid number, so a blank
+    // field never erases the originally captured measurement.
+    const updates: Partial<ViolationRecord> = {
+      type: editingEvidence.type,
+      verificationStatus: editingEvidence.verificationStatus,
+      objects: editingEvidence.objects,
+      reviewStatus: editingEvidence.reviewStatus,
+      reviewNote: editingEvidence.reviewNote,
+    };
+    if (speedValid) updates.speed = parsedSpeed;
+
+    const ok = await updateViolation(editingEvidence.id, updates);
+    if (ok) {
+      patchEvidenceInState(editingEvidence.id, updates);
+    } else {
+      setStorageError('Could not update evidence metadata.');
+    }
+    setEditingEvidence(null);
+  };
+
+  /** Evidence for a detection, shown in the capture toast. */
+  type CaptureCandidate = {
+    status: 'confirmed' | 'unverified' | 'rejected';
+    violationType: string | null;
+    reasons: string[];
+  };
+
+  const showCaptureResult = (result: CaptureCandidate, ms = 6000) => {
+    setCaptureResult(result);
+    if (captureResultTimerRef.current) clearTimeout(captureResultTimerRef.current);
+    captureResultTimerRef.current = setTimeout(() => setCaptureResult(null), ms);
+  };
+
+  /**
+   * Capture the current camera frame and persist it as evidence.
+   *
+   * `mode`:
+   *  - 'manual'  ÃÂ¢ÃÂÃÂ user pressed Capture; the image is always saved, but the
+   *                violation verdict is still decided by the verification
+   *                pipeline (never assumed).
+   *  - 'auto'    ÃÂ¢ÃÂÃÂ fired by the detection loop once a candidate is CONFIRMED;
+   *                nothing is saved if the candidate is not confirmed, and the
+   *                de-dup window stops repeated captures of one event.
+   */
+  const captureEvidence = async (mode: 'manual' | 'auto' = 'manual') => {
+    if (autoCaptureInFlightRef.current) return; // never overlap captures
+    if (!videoRef.current || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    autoCaptureInFlightRef.current = true;
+    try {
+      canvas.width = videoRef.current.videoWidth || 640;
+      canvas.height = videoRef.current.videoHeight || 360;
+      ctx.drawImage(videoRef.current, 0, 0);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+      const now = Date.now();
+      const live = liveCaptureCtxRef.current;
+      const top = lastPredictionsRef.current
+        .slice()
+        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0];
+      const rawClass = top?.class || 'manual_capture';
+      const confidence = top?.score ?? 0;
+      const topIndex = top ? lastPredictionsRef.current.indexOf(top) : -1;
+      const verdict = topIndex >= 0 ? lastVerdictsRef.current[topIndex] ?? null : null;
+      const classified = verdict ? verdict.subtype : 'other';
+      const streak = verificationRef.current.streakFor(rawClass);
+      const minConf = DEFAULT_VERIFICATION_CONFIG.minDetectionConfidence;
+
+      // TRIPLE_RIDING context: this two-wheeler's box + every person box.
+      let candidate: CaptureCandidate;
+      if (top && confidence >= minConf) {
+        const personBoxes: Box[] = lastPredictionsRef.current
+          .filter((p) => p.class === 'person')
+          .map((p) => ({ x: p.bbox[0], y: p.bbox[1], width: p.bbox[2], height: p.bbox[3] }));
+        const twoWheelerBox: Box = {
+          x: top.bbox[0],
+          y: top.bbox[1],
+          width: top.bbox[2],
+          height: top.bbox[3],
+        };
+        candidate = verifyCandidate(DEFAULT_VERIFICATION_CONFIG, {
+          detectedClass: rawClass,
+          confidence,
+          speedKmh: live.speedKmh,
+          hasGpsFix: live.gpsStatus === 'locked',
+          isVehicle: isVehicleClass(rawClass),
+          frameStreak: streak,
+          now,
+          tripleRiding: TWO_WHEELER_CLASSES.includes(rawClass)
+            ? { twoWheeler: twoWheelerBox, persons: personBoxes }
+            : null,
+        });
+      } else {
+        candidate = {
+          status: 'unverified',
+          violationType: null,
+          reasons: [
+            top
+              ? `Confidence ${(confidence * 100).toFixed(0)}% below minimum ${(minConf * 100).toFixed(0)}%`
+              : 'No active detection ÃÂ¢ÃÂÃÂ manual capture',
+            'Saved as UNVERIFIED candidate for human review (not a confirmed violation)',
+          ],
+        };
+      }
+
+      if (verdict) {
+        candidate.reasons = [
+          ...candidate.reasons,
+          `Classification: ${verdict.label} (${verdict.verified ? 'verified by trained model' : 'unverified heuristic'}) ÃÂ¢ÃÂÃÂ ${verdict.basis}`,
+        ];
+      }
+
+      // Automatic capture only fires for a CONFIRMED violation.
+      if (mode === 'auto' && candidate.status !== 'confirmed') return;
+
+      // De-dup: one record per continuing violation event.
+      if (
+        candidate.violationType &&
+        verificationRef.current.isDuplicate(candidate.violationType, now)
+      ) {
+        if (mode === 'manual') {
+          showCaptureResult({
+            status: 'unverified',
+            violationType: candidate.violationType,
+            reasons: ['Duplicate suppressed ÃÂ¢ÃÂÃÂ same violation event captured recently'],
+          });
+        }
+        return;
+      }
+
+      if (mode === 'manual') setCapturedImages(prev => [...prev, dataUrl]);
+
+      try {
+        const resp = await fetch(dataUrl);
+        const blob = await resp.blob();
+        const id = `${now}_${Math.floor(Math.random() * 1e6)}`;
+        const record: ViolationRecord = {
+          id,
+          type: candidate.violationType || rawClass,
+          createdAt: now,
+          speed: speedKmh,
+          objects: live.detectedObjects.join(', '),
+          confidence: Math.round(confidence * 100),
+          lat: live.gpsCoords?.lat ?? null,
+          lng: live.gpsCoords?.lng ?? null,
+          blob,
+          verificationStatus: candidate.status === 'confirmed' ? 'confirmed' : 'unverified',
+          reasons: candidate.reasons,
+          vehicleClass: classified,
+        };
+        const ok = await saveViolation(record);
+        if (!ok) {
+          setStorageError('Evidence could not be saved locally.');
+          return;
+        }
+        if (candidate.violationType) {
+          verificationRef.current.markSaved(candidate.violationType, now);
+        }
+        setEvidenceViolations(prev => [
+          { id, url: URL.createObjectURL(blob), label: record.type, record },
+          ...prev,
+        ]);
+        showCaptureResult(
+          {
+            status: candidate.status === 'confirmed' ? 'confirmed' : 'unverified',
+            violationType: candidate.violationType,
+            reasons: candidate.reasons,
+          },
+          mode === 'auto' ? 5000 : 6000
+        );
+      } catch (e) {
+        console.error('Violation save failed:', e);
+        setStorageError('Evidence could not be saved locally.');
+      }
+    } finally {
+      autoCaptureInFlightRef.current = false;
+    }
+  };
+
+  const confirmDeleteEvidence = async (id: string) => {
+    const ok = await deleteViolation(id);
+    if (ok) {
+      setEvidenceViolations(prev => {
+        const target = prev.find((x) => x.id === id);
+        if (target) URL.revokeObjectURL(target.url);
+        return prev.filter((x) => x.id !== id);
+      });
+    } else {
+      setStorageError('Could not delete evidence.');
+    }
+    setConfirmDeleteId(null);
+  };
+
+  // Feature 1: Detected vehicles with license plates
+  const [detectedVehicles, setDetectedVehicles] = useState<DetectedVehicle[]>([]);
+
+  // Feature 7: Tracking state
+  const [isTracking, setIsTracking] = useState(false);
+  const [wifiRange, setWifiRange] = useState(0);
+  const [trackingData, setTrackingData] = useState<{ lat: number; lng: number; speed: number; timestamp: number }[]>([]);
+
+  // Emergency contacts state
+  const [savedContacts, setSavedContacts] = useState<SavedContact[]>(() => {
+    try {
+      const saved = localStorage.getItem('aegis_emergency_contacts');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [isAddContactOpen, setIsAddContactOpen] = useState(false);
+  const [newContactName, setNewContactName] = useState('');
+  const [newContactPhone, setNewContactPhone] = useState('');
+
+  // GPS tracker ÃÂ¢ÃÂÃÂ high-accuracy, rapid updates
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setGpsStatus('unavailable');
+      return;
+    }
+
+    let watchId: number;
+
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
+      const R = 6371000;
+      const dLat = toRad(b.lat - a.lat);
+      const dLng = toRad(b.lng - a.lng);
+      const lat1 = toRad(a.lat);
+      const lat2 = toRad(b.lat);
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(h));
+    };
+
+    const startGPS = () => {
+      setGpsStatus('searching');
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const coords: any = pos.coords;
+          const lat = coords.latitude;
+          const lng = coords.longitude;
+          const acc = typeof coords.accuracy === 'number' ? parseFloat(coords.accuracy.toFixed(1)) : 0;
+          const alt = typeof coords.altitude === 'number' && !isNaN(coords.altitude) ? parseFloat(coords.altitude.toFixed(1)) : null;
+          const heading = typeof coords.heading === 'number' && !isNaN(coords.heading) ? Math.round(coords.heading) : null;
+
+          lastGpsFixAtRef.current = Date.now();
+          setGpsCoords({ lat, lng });
+          setGpsAccuracy(acc);
+          setGpsAltitude(alt);
+          setGpsHeading(heading);
+          setGpsSignalWeak(acc > 30 || (typeof pos.coords.accuracy !== 'number' && acc === 0));
+
+          // Native speed in m/s, with a distance/time fallback when the device doesn't supply it
+          let speedMps = typeof coords.speed === 'number' && !isNaN(coords.speed) && coords.speed >= 0 ? coords.speed : null;
+          if (speedMps === null && lastPosRef.current) {
+            const dt = Math.max(0.001, (pos.timestamp - lastPosRef.current.t) / 1000);
+            speedMps = haversine(lastPosRef.current, { lat, lng }) / dt;
+          }
+          let speedKmhVal = speedMps !== null ? Math.max(0, parseFloat((speedMps * 3.6).toFixed(1))) : 0;
+          // Stationary filter: sub-jitter speeds (e.g. GPS drift while parked) become zero
+          if (speedKmhVal < 1.5) speedKmhVal = 0;
+          // Reject physically small position jumps that can't be real movement
+          if (speedMps !== null && speedKmhVal === 0 && lastPosRef.current) {
+            const dt = Math.max(0.001, (pos.timestamp - lastPosRef.current.t) / 1000);
+            const jumpM = haversine(lastPosRef.current, { lat, lng });
+            if (jumpM / dt * 3.6 < 1.5) speedKmhVal = 0;
+          }
+          setGpsSpeed(speedKmhVal);
+          setSpeedKmh(speedKmhVal);
+          setSpeedHistory((h) => [...h.slice(-29), speedKmhVal]);
+
+          lastPosRef.current = { lat, lng, t: pos.timestamp };
+          setSatellites(Math.floor(Math.random() * 4) + 8);
+          setGpsStatus('locked');
+        },
+        (err) => {
+          if (err.code === err.PERMISSION_DENIED) {
+            setGpsStatus('denied');
+            setGpsSpeed(0); setSpeedKmh(0);
+          } else if (err.code === err.TIMEOUT) {
+            setGpsSignalWeak(true);
+            setGpsStatus('searching');
+            setGpsSpeed(0); setSpeedKmh(0);
+          } else {
+            setGpsSignalWeak(true);
+            setGpsStatus('unavailable');
+            setGpsSpeed(0); setSpeedKmh(0);
+          }
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+      );
+    };
+
+    startGPS();
+    return () => {
+      if (watchId !== undefined) navigator.geolocation.clearWatch(watchId);
+    };
+  }, []);
+
+  // Feature 7: Tracking with wifi range data
+  useEffect(() => {
+    if (!isTracking || !isWebcamActive) return;
+
+    const interval = setInterval(() => {
+      setWifiRange(Math.floor(Math.random() * 100) + 1);
+      if (gpsCoords) {
+        setTrackingData((prev) => [
+          ...prev.slice(-50),
+          {
+            lat: gpsCoords.lat + (Math.random() - 0.5) * 0.001,
+            lng: gpsCoords.lng + (Math.random() - 0.5) * 0.001,
+            speed: speedKmh,
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isTracking, isWebcamActive, gpsCoords, speedKmh]);
+
+  // ---------------------------------------------------------------------------
+// Camera acquisition / front-rear switching
+// ---------------------------------------------------------------------------
+
+  /** Pick the concrete videoinput deviceId for a facing mode.
+   *  `facingMode` alone is unreliable on Android Chrome (an `ideal` hint is
+   *  often ignored and the front camera is returned), so we resolve a real
+   *  deviceId from enumerateDevices() and request that device exactly.
+   *  Labels are only populated once camera permission has been granted.
+   */
+  const pickDeviceId = async (desired: 'user' | 'environment'): Promise<string | null> => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter((d) => d.kind === 'videoinput' && d.deviceId);
+      if (!cams.length) return null;
+      // Labels are ONLY populated once camera permission has been granted.
+      // Before that they are empty, so any device we picked would be a blind
+      // guess ÃÂ¢ÃÂÃÂ in that case fall through to the facingMode constraints,
+      // which are reliable for selecting the rear camera on Android Chrome.
+      const labelled = cams.filter((d) => (d.label || '').length > 0);
+      if (!labelled.length) return null;
+      const rearRe = /back|rear|environment|world/i;
+      const frontRe = /front|user|face|selfie/i;
+      const wantRear = desired === 'environment';
+      const match = labelled.find((d) => (wantRear ? rearRe : frontRe).test(d.label || ''));
+      return match?.deviceId ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  /** True once the element is actually receiving frames from the new source. */
+  const waitForVideoFrames = (el: HTMLVideoElement, timeoutMs = 3000): Promise<boolean> =>
+    new Promise((resolve) => {
+      if (el.readyState >= 2 && el.videoWidth > 0) return resolve(true);
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        el.removeEventListener('loadeddata', onReady);
+        el.removeEventListener('canplay', onReady);
+        el.removeEventListener('resize', onReady);
+        clearTimeout(timer);
+        resolve(ok);
+      };
+      const onReady = () => {
+        if (el.readyState >= 2 && el.videoWidth > 0) finish(true);
+      };
+      el.addEventListener('loadeddata', onReady);
+      el.addEventListener('canplay', onReady);
+      el.addEventListener('resize', onReady);
+      const timer = setTimeout(() => finish(el.readyState >= 2 && el.videoWidth > 0), timeoutMs);
+    });
+
+  /** Acquire the requested camera and only report success once frames flow. */
+  const performCameraAcquire = async (desired: 'user' | 'environment'): Promise<boolean> => {
+    const videoEl = videoRef.current;
+    if (!videoEl) return false;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setWebcamError('Camera is not supported in this browser.');
+      setIsWebcamActive(false);
+      return false;
+    }
+
+    const gen = ++cameraGenRef.current;
+    cameraSwitchingRef.current = true;
+    setSwitchingCamera(true);
+
+    // Release the previous stream (browsers usually allow only one camera).
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    videoEl.srcObject = null;
+
+    const deviceId = await pickDeviceId(desired);
+    const attempts: MediaStreamConstraints[] = [];
+    if (deviceId) {
+      attempts.push({
+        video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+    }
+    attempts.push({ video: { facingMode: { exact: desired }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    attempts.push({ video: { facingMode: { ideal: desired } }, audio: false });
+    attempts.push({ video: true, audio: false });
+
+    let stream: MediaStream | null = null;
+    let lastErr: any = null;
+    for (const constraints of attempts) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        break;
+      } catch (err: any) {
+        lastErr = err;
+        if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') break;
+      }
+    }
+
+    // A newer request superseded us ÃÂ¢ÃÂÃÂ drop this result instead of applying it.
+    if (gen !== cameraGenRef.current) {
+      stream?.getTracks().forEach((t) => t.stop());
+      return false;
+    }
+
+    if (!stream) {
+      const name = lastErr?.name;
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+        setWebcamError('Camera permission denied. Please allow camera access in your browser settings.');
+      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+        setWebcamError('No camera device detected on this device.');
+      } else {
+        setWebcamError(lastErr?.message || 'Camera access failed.');
+      }
+      setIsWebcamActive(false);
+      cameraSwitchingRef.current = false;
+      setSwitchingCamera(false);
+      return false;
+    }
+
+    streamRef.current = stream;
+    videoEl.srcObject = stream;
+    videoEl.muted = true;
+    try {
+      await videoEl.play();
+    } catch {
+      videoEl.muted = true;
+      try {
+        await videoEl.play();
+      } catch {
+        /* verified below via frame delivery */
+      }
+    }
+
+    const gotFrames = await waitForVideoFrames(videoEl);
+
+    if (gen !== cameraGenRef.current) {
+      stream.getTracks().forEach((t) => t.stop());
+      return false;
+    }
+
+    if (!gotFrames) {
+      // The new source never produced frames ÃÂ¢ÃÂÃÂ do NOT claim it is active.
+      stream.getTracks().forEach((t) => t.stop());
+      if (streamRef.current === stream) streamRef.current = null;
+      videoEl.srcObject = null;
+      setIsWebcamActive(false);
+      return false;
+    }
+
+    const track = stream.getVideoTracks()[0];
+    const settings = track?.getSettings?.() ?? {};
+    lastGoodRef.current = {
+      facing: desired,
+      deviceId: settings.deviceId ?? deviceId ?? null,
+    };
+
+    setWebcamError(null);
+    setFacingMode(desired);
+    setIsWebcamActive(true);
+    setIsTracking(true);
+    setDetectionActive(true);
+    cameraSwitchingRef.current = false;
+    setSwitchingCamera(false);
+    return true;
+  };
+
+  /**
+   * Public entry point used by Start Camera and the front/rear button.
+   * Exactly one click == exactly one switch. Rapid clicks coalesce instead of
+   * corrupting the stream, and a failed switch restores the last good camera.
+   */
+  const startWebcam = useCallback(async (mode?: 'user' | 'environment') => {
+    if (mode) facingModeRef.current = mode;
+    // Reflect the user's intent immediately in the button.
+    setFacingMode(facingModeRef.current);
+
+    if (switchBusyRef.current) {
+      switchPendingRef.current = true;
+      return;
+    }
+    switchBusyRef.current = true;
+    try {
+      let guard = 0;
+      do {
+        switchPendingRef.current = false;
+        const desired = facingModeRef.current;
+        const ok = await performCameraAcquire(desired);
+        // If the requested camera could not be opened, restore the last
+        // working one so the user is never left with no feed.
+        if (!ok) {
+          const good = lastGoodRef.current;
+          if (good && good.facing !== desired && guard < 2) {
+            facingModeRef.current = good.facing;
+            setFacingMode(good.facing);
+            guard++;
+            continue;
+          }
+          setWebcamError(
+            desired === 'environment'
+              ? 'Rear camera is not available on this device.'
+              : 'Front camera could not be opened.'
+          );
+        }
+        guard++;
+      } while (switchPendingRef.current && guard < 4);
+    } finally {
+      switchBusyRef.current = false;
+      switchPendingRef.current = false;
+      cameraSwitchingRef.current = false;
+      setSwitchingCamera(false);
+    }
+  }, []);
+
+  // Auto-start the camera once on mount only. The dependency list is
+  // intentionally empty: this must never re-run and fight the front/rear
+  // toggle with a second competing restart.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      startWebcam();
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Clean up the camera and invalidate any pending switch on unmount.
+  useEffect(() => {
+    return () => {
+      cameraGenRef.current++; // invalidate in-flight responses
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      if (videoRef.current) videoRef.current.srcObject = null;
+    };
+  }, []);
+
+  const stopWebcam = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    // Cancel any in-flight switch so a late response cannot resurrect the feed.
+    cameraGenRef.current++;
+    cameraSwitchingRef.current = false;
+    switchPendingRef.current = false;
+    setSwitchingCamera(false);
+    setIsWebcamActive(false);
+    setDetectionActive(false);
+    setDetectedObjects([]);
+    setIsTracking(false);
+    setTrackingData([]);
+  }, []);
+
+  // Load COCO-SSD model once
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const tf = await import('@tensorflow/tfjs');
+        await tf.ready();
+        const cocoSsd = await import('@tensorflow-models/coco-ssd');
+        const m = await cocoSsd.load();
+        if (!cancelled) {
+          modelRef.current = m;
+          setModelReady(true);
+        }
+      } catch {
+        if (!cancelled) setModelError('Object detection model failed to load.');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Stop camera cleanup for detection canvas
+  useEffect(() => {
+    if (!isWebcamActive) {
+      const c = detectCanvasRef.current;
+      const ctx = c?.getContext('2d');
+      if (c && ctx) ctx.clearRect(0, 0, c.width, c.height);
+      lastPredictionsRef.current = [];
+    }
+  }, [isWebcamActive]);
+
+  // Real COCO-SSD detection loop (approx. 4 detections/sec; video stays smooth)
+  useEffect(() => {
+    if (!detectionActive || !isWebcamActive || !modelReady) return;
+    let active = true;
+
+    const loop = async (t: number) => {
+      if (!active) return;
+      rafRef.current = requestAnimationFrame(loop);
+      // Pause inference while the camera source is being replaced, so boxes
+      // are never computed against the outgoing feed.
+      if (cameraSwitchingRef.current) return;
+      const v = videoRef.current;
+      const c = detectCanvasRef.current;
+      if (!v || !c || !modelRef.current) return;
+      if (v.readyState >= 2 && v.videoWidth > 0) {
+        if (t - lastInferRef.current >= 250) {
+          lastInferRef.current = t;
+          setIsDetecting(true);
+          try {
+            const preds = await modelRef.current.detect(v);
+            const filtered = preds.filter((p) => p.score >= 0.5);
+            lastPredictionsRef.current = filtered;
+            verificationRef.current.updateFrame(filtered.map((p) => p.class));
+
+            // --- Indian vehicle classification -----------------------------
+            // Trained weights (if present) resolve the true subclass on the
+            // cropped region; otherwise COCO-SSD + measured geometry gives an
+            // explicitly-unverified estimate. Never blocks the detector.
+            const frameWidth = v.videoWidth || 1;
+            const frameHeight = v.videoHeight || 1;
+            const MAX_DEDICATED_BOXES = 4;
+            if (dedicatedModelRef.current && filtered.length && t - lastDedicatedInferRef.current >= 1000) {
+              lastDedicatedInferRef.current = t;
+              const boxes = filtered.slice(0, MAX_DEDICATED_BOXES).map((p) => ({
+                x: p.bbox[0],
+                y: p.bbox[1],
+                width: p.bbox[2],
+                height: p.bbox[3],
+              }));
+              try {
+                dedicatedResultsRef.current = await classifyRegionsWithDedicatedModel(dedicatedModelRef.current, v, boxes);
+              } catch {
+                dedicatedResultsRef.current = [];
+              }
+            } else if (!dedicatedModelRef.current) {
+              dedicatedResultsRef.current = [];
+            }
+            lastVerdictsRef.current = filtered.map((p, i) => {
+              const dedicated = i < MAX_DEDICATED_BOXES ? dedicatedResultsRef.current?.[i] : null;
+              return classifyVehicle({
+                detectorClass: p.class,
+                score: p.score,
+                box: { x: p.bbox[0], y: p.bbox[1], width: p.bbox[2], height: p.bbox[3] },
+                frameWidth,
+                frameHeight,
+                dedicatedLabel: dedicated?.subtype ?? null,
+                dedicatedScore: dedicated?.score ?? null,
+              });
+            });
+
+            const classes = filtered.map((p) => p.class).join(',');
+            if (classes !== lastClassesRef.current) {
+              lastClassesRef.current = classes;
+              setDetectedObjects(filtered.map((p) => p.class));
+            }
+            setDetectionConfidence(filtered.length ? Math.round(Math.max(...filtered.map((p) => p.score)) * 100) : 0);
+
+            // --- Automatic evidence capture ---------------------------------
+            // Only fires once a candidate actually passes the verification
+            // rules. Throttled, de-duplicated, and never blocks the loop.
+            if (
+              DEFAULT_VERIFICATION_CONFIG.autoCaptureConfirmed &&
+              filtered.length &&
+              t - lastAutoCaptureCheckRef.current >= 1200
+            ) {
+              lastAutoCaptureCheckRef.current = t;
+              const liveAuto = liveCaptureCtxRef.current;
+              const personBoxes: Box[] = filtered
+                .filter((p) => p.class === 'person')
+                .map((p) => ({ x: p.bbox[0], y: p.bbox[1], width: p.bbox[2], height: p.bbox[3] }));
+              const speed = liveAuto.speedKmh;
+              const locked = liveAuto.gpsStatus === 'locked';
+              for (const p of filtered) {
+                const cls = p.class;
+                const isTwoWheeler = TWO_WHEELER_CLASSES.includes(cls);
+                const isVehicleish = isVehicleClass(cls);
+                // Only rules we can actually evaluate are auto-triggered.
+                const maybeOverspeed =
+                  isVehicleish && locked && speed > DEFAULT_VERIFICATION_CONFIG.overspeedLimitKmh;
+                const maybeTriple = isTwoWheeler && personBoxes.length >= 2;
+                if (!maybeOverspeed && !maybeTriple) continue;
+
+                const verdictCheck = verifyCandidate(DEFAULT_VERIFICATION_CONFIG, {
+                  detectedClass: cls,
+                  confidence: p.score,
+                  speedKmh: speed,
+                  hasGpsFix: locked,
+                  isVehicle: isVehicleish,
+                  frameStreak: verificationRef.current.streakFor(cls),
+                  now: Date.now(),
+                  tripleRiding: isTwoWheeler
+                    ? {
+                        twoWheeler: { x: p.bbox[0], y: p.bbox[1], width: p.bbox[2], height: p.bbox[3] },
+                        persons: personBoxes,
+                      }
+                    : null,
+                });
+                if (
+                  verdictCheck.status === 'confirmed' &&
+                  verdictCheck.violationType &&
+                  !verificationRef.current.isDuplicate(verdictCheck.violationType, Date.now())
+                ) {
+                  // Fire and forget: captureEvidence serialises itself.
+                  void captureEvidence('auto');
+                  break;
+                }
+              }
+            }
+          } catch {
+            // skip frame
+          } finally {
+            setIsDetecting(false);
+          }
+        }
+        // Draw latest boxes (scaled from video intrinsic size to displayed size)
+        const ctx = c.getContext('2d');
+        if (ctx) {
+          if (c.width !== c.clientWidth) c.width = c.clientWidth;
+          if (c.height !== c.clientHeight) c.height = c.clientHeight;
+          ctx.clearRect(0, 0, c.width, c.height);
+          const sx = c.width / v.videoWidth;
+          const sy = c.height / v.videoHeight;
+          lastPredictionsRef.current.forEach((p, idx) => {
+            const [x, y, w, h] = p.bbox;
+            const verdict = lastVerdictsRef.current[idx];
+            // Green outline = verified subclass (trained model).
+            // Orange outline = heuristic / unverified estimate.
+            ctx.strokeStyle = verdict && !verdict.verified && isVehicleClass(p.class) ? '#FF8C69' : '#22c55e';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x * sx, y * sy, w * sx, h * sy);
+            const name = verdict ? verdict.label : toDetectedLabel(p.class, p.score).label;
+            const pct = verdict ? Math.round(verdict.confidence * 100) : Math.round(p.score * 100);
+            const mark = verdict && !verdict.verified && isVehicleClass(p.class) ? ' ~' : '';
+            const label = `${name}${mark} ÃÂ¢ÃÂÃÂ¢ ${pct}%`;
+            ctx.font = 'bold 12px monospace';
+            const tw = ctx.measureText(label).width;
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            ctx.fillRect(x * sx, Math.max(0, y * sy - 18), tw + 6, 16);
+            ctx.fillStyle = '#fff';
+            ctx.fillText(label, x * sx + 3, Math.max(12, y * sy - 5));
+          });
+        }
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(loop);
+    return () => {
+      active = false;
+      cancelAnimationFrame(rafRef.current);
+      const c = detectCanvasRef.current;
+      const ctx = c?.getContext('2d');
+      if (c && ctx) ctx.clearRect(0, 0, c.width, c.height);
+      lastPredictionsRef.current = [];
+      lastClassesRef.current = '';
+    };
+  }, [detectionActive, isWebcamActive, modelReady]);
+
+
+  // Save contacts to localStorage
+  useEffect(() => {
+    localStorage.setItem('aegis_emergency_contacts', JSON.stringify(savedContacts));
+  }, [savedContacts]);
+
+  const addContact = () => {
+    if (!newContactName.trim() || !newContactPhone.trim()) return;
+    setSavedContacts((prev) => [
+      ...prev,
+      { id: Date.now().toString(), name: newContactName.trim(), phone: newContactPhone.trim() },
+    ]);
+    setNewContactName('');
+    setNewContactPhone('');
+    setIsAddContactOpen(false);
+  };
+
+  const removeContact = (id: string) => {
+    setSavedContacts((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  const getContactIcon = (type: string) => {
+    switch (type) {
+      case 'police': return AlertOctagon;
+      case 'ambulance': return Heart;
+      case 'fire': return ShieldAlert;
+      default: return Phone;
+    }
+  };
+
+  const speedColor = speedKmh > 80 ? '#FF4D4D' : speedKmh > 50 ? '#FFB347' : '#FFD18C';
+
+
+  return (
+    <div className="pt-24 pb-16 px-4 sm:px-8 max-w-[1700px] mx-auto space-y-6">
+
+      {/* TOP HUD - 2 METRICS - Scrolls naturally with page */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {/* 1. Digital Speedometer with Detected Vehicles */}
+        <div className="glass-panel p-5 border-cyber-blue/20 relative overflow-hidden">
+          <div className="flex items-center gap-2 mb-3">
+            <Gauge className="w-5 h-5 text-cyber-blue" />
+            <span className="text-[10px] font-black uppercase tracking-widest text-white/40">Digital Speedometer</span>
+          </div>
+          <div className="flex items-end gap-2">
+            <span className="text-4xl font-display font-black tracking-tight" style={{ color: speedColor }}>
+              {esp32Connected && esp32Data ? esp32Data.speed : speedKmh.toFixed(0)}
+            </span>
+            <span className="text-sm text-white/50 font-mono mb-1">km/h</span>
+          </div>
+          {esp32Connected && esp32Data && (
+            <p className="text-[9px] font-mono text-cyber-green mt-1">ESP32-CAM Live Data</p>
+          )}
+          <div className="mt-3 h-2 bg-white/5 rounded-full overflow-hidden">
+            <motion.div
+              className="h-full rounded-full"
+              style={{ backgroundColor: speedColor }}
+              animate={{ width: `${(speedKmh / 120) * 100}%` }}
+              transition={{ duration: 0.5 }}
+            />
+          </div>
+          {/* Speed history sparkline */}
+          <div className="mt-2 flex items-end gap-0.5 h-6">
+            {speedHistory.map((s, i) => (
+              <div
+                key={i}
+                className="flex-1 rounded-t-sm opacity-60"
+                style={{
+                  height: `${(s / 120) * 100}%`,
+                  backgroundColor: speedColor,
+                }}
+              />
+            ))}
+          </div>
+
+          {/* Feature 1: Detected Vehicles with License Plates */}
+          {detectedVehicles.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-white/10">
+              <p className="text-[9px] font-black uppercase tracking-widest text-cyber-blue mb-2 flex items-center gap-1">
+                <Car className="w-3 h-3" /> Detected Vehicles
+              </p>
+              <div className="space-y-1.5 max-h-[120px] overflow-y-auto">
+                {detectedVehicles.map((vehicle, idx) => (
+                  <div key={vehicle.id} className="flex items-center justify-between bg-white/5 rounded-lg px-2 py-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] font-mono text-white/40">#{idx + 1}</span>
+                      <span className="text-[10px] font-bold text-white">{vehicle.plate}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[9px] font-mono">
+                      <span className="text-cyber-green">{vehicle.distance}m</span>
+                      <span className="text-white/50">{vehicle.speed}km/h</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 2. ESP32-CAM Connection & Live Stream */}
+        <div className="glass-panel p-5 border-cyber-green/20 relative overflow-hidden space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <Camera className="w-5 h-5 text-cyber-green shrink-0" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-white/40 truncate">ESP32-CAM Stream</span>
+            </div>
+            <button
+              onClick={() => setEsp32Connected(!esp32Connected)}
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shrink-0 ${
+                esp32Connected
+                  ? 'bg-cyber-green/20 text-cyber-green border border-cyber-green/30'
+                  : 'bg-cyber-green text-black border border-cyber-green/30'
+              }`}
+            >
+              {esp32Connected ? 'Disconnect' : 'Connect'}
+            </button>
+          </div>
+
+          <div className="space-y-1.5">
+            <p className="text-[9px] text-white/40 uppercase tracking-wider">Stream URL (ESP32-CAM WiFi hotspot)</p>
+            <input
+              type="text"
+              value={esp32StreamUrl}
+              onChange={(e) => setEsp32StreamUrl(e.target.value)}
+              placeholder="http://192.168.4.1/stream"
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-cyber-green"
+            />
+          </div>
+
+          {esp32Connected ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-[10px] font-mono text-cyber-green">
+                <div className={`w-2 h-2 rounded-full ${esp32StreamStatus === 'live' ? 'bg-cyber-green animate-pulse' : 'bg-cyber-orange'}`} />
+                <span>{esp32StreamStatus === 'live' ? 'Live' : esp32StreamStatus === 'connecting' ? 'Connecting…' : 'Issue'} — {esp32StreamUrl}</span>
+              </div>
+              {esp32Reachable === false && (
+                <p className="text-[10px] text-cyber-red">ESP32 access point (192.168.4.1) unreachable — check WiFi connection.</p>
+              )}
+              {esp32Reachable === true && esp32StreamStatus === 'error' && (
+                <p className="text-[10px] text-cyber-orange">WiFi/AP reachable, but the camera stream is unavailable or errored.</p>
+              )}
+              {esp32StreamError && <p className="text-[9px] text-white/50">{esp32StreamError}</p>}
+              <p className="text-[9px] text-white/40">Live preview is shown in the main camera view (single stream). Resize/rotation does not restart it.</p>
+              {esp32Data && (
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-white/5 rounded-lg p-2">
+                    <p className="text-[8px] text-white/40 uppercase">Speed</p>
+                    <p className="text-xs font-mono font-bold text-cyber-green">{esp32Data.speed} km/h</p>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-2">
+                    <p className="text-[8px] text-white/40 uppercase">Persons</p>
+                    <p className="text-xs font-mono font-bold text-cyber-blue">{esp32Data.persons}</p>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-2">
+                    <p className="text-[8px] text-white/40 uppercase">Plates</p>
+                    <p className="text-xs font-mono font-bold text-cyber-purple">{esp32Data.plates.length}</p>
+                  </div>
+                </div>
+              )}
+              {detectedPersons.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-white/40">Detected Persons</p>
+                  {detectedPersons.map((person, idx) => (
+                    <div key={idx} className="flex items-center gap-2 bg-white/5 rounded-lg px-2 py-1.5">
+                      <User className="w-3.5 h-3.5 text-cyber-blue" />
+                      <span className="text-[10px] font-bold text-white">{person}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2 text-[10px] text-white/50">
+              <p>1) Connect this device to WiFi: <span className="text-white font-mono">SmartHelmet_AP</span> (password <span className="text-white font-mono">12345678</span>, 2.4&nbsp;GHz, channel&nbsp;1). Not all devices support 2.4&nbsp;GHz (max 4 devices).</p>
+              <p>2) Keep stream URL as <span className="text-white font-mono">http://192.168.4.1/stream</span> and tap <span className="text-white/80 font-bold">Connect</span>. Live video appears in the main camera view.</p>
+              <p className="text-white/40">If the app is opened over HTTPS, the browser may block the local HTTP stream (mixed content). This is separate from WiFi reachability.</p>
+            </div>
+          )}
+        </div>
+
+        {/* 3. GPS Satellite Link */}
+        <div className="glass-panel p-5 border-cyber-purple/20 relative overflow-hidden">
+          <div className="flex items-center gap-2 mb-3">
+            <Radio className="w-5 h-5 text-cyber-purple" />
+            <span className="text-[10px] font-black uppercase tracking-widest text-white/40">GPS Satellite</span>
+          </div>
+          <div className="flex items-center gap-2 mb-2">
+            {gpsStatus === 'locked' ? (
+              <CheckCircle className="w-5 h-5 text-cyber-green" />
+            ) : gpsStatus === 'denied' ? (
+              <WifiOff className="w-5 h-5 text-cyber-red" />
+            ) : (
+              <Wifi className="w-5 h-5 text-cyber-purple animate-pulse" />
+            )}
+            <span className={`text-sm font-display font-black uppercase ${
+              gpsStatus === 'locked' ? 'text-cyber-green' : gpsStatus === 'denied' ? 'text-cyber-red' : 'text-cyber-purple'
+            }`}>
+              {gpsStatus === 'locked' ? '3D Fix Locked' : gpsStatus === 'denied' ? 'Access Denied' : gpsStatus === 'searching' ? 'Acquiring...' : 'Unavailable'}
+            </span>
+          </div>
+          {gpsCoords && (
+            <div className="space-y-1">
+              <p className="text-[10px] font-mono text-white/50">
+                LAT: <span className="text-white">{gpsCoords.lat.toFixed(6)}</span>
+              </p>
+              <p className="text-[10px] font-mono text-white/50">
+                LNG: <span className="text-white">{gpsCoords.lng.toFixed(6)}</span>
+              </p>
+              <p className="text-[10px] font-mono text-white/50">
+                ACC: <span className="text-cyber-green">ÃÂÃÂ±{gpsAccuracy}m</span> | SAT: <span className="text-cyber-purple">{satellites}</span>
+              </p>
+              <p className="text-[10px] font-mono text-white/50">
+                ALT: <span className="text-white">{gpsAltitude !== null ? `${gpsAltitude}m` : 'ÃÂ¢ÃÂÃÂ'}</span> | HDG: <span className="text-white">{gpsHeading !== null ? `${gpsHeading}ÃÂÃÂ°` : 'ÃÂ¢ÃÂÃÂ'}</span> | SPD: <span className="text-cyber-green">{gpsSpeed.toFixed(1)} km/h</span>
+              </p>
+            </div>
+          )}
+          {gpsSignalWeak && gpsStatus !== 'denied' && (
+            <p className="text-[9px] text-cyber-orange mt-2">GPS signal is weak ÃÂ¢ÃÂÃÂ move to open sky for better accuracy.</p>
+          )}
+          {gpsStatus === 'denied' && (
+            <p className="text-[9px] text-cyber-red/70 mt-2">Enable location permissions in browser settings</p>
+          )}
+        </div>
+
+      </div>
+
+      {/* MAIN CONTENT: WEBCAM + DETECTION + TRACKING */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Webcam Feed - Takes 2 columns */}
+        <div className="lg:col-span-2 space-y-4">
+          <div className="glass-panel overflow-hidden relative w-full bg-black flex items-center justify-center border-white/10 aspect-[4/3] max-h-[calc(100dvh-10rem)] sm:max-h-[calc(100dvh-8rem)]" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+            {/* Top badges */}
+            <div className="absolute top-4 left-4 z-40 flex items-center gap-2">
+              <span className="px-3 py-1 bg-black/80 backdrop-blur-md border border-white/10 rounded-xl text-[9px] font-black uppercase text-cyber-blue flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${(esp32Connected || isWebcamActive) ? 'bg-cyber-green animate-pulse' : 'bg-white/20'}`} />
+                {esp32Connected ? 'ESP32 LIVE' : isWebcamActive ? 'LIVE FEED' : 'STANDBY'}
+              </span>
+              {detectionActive && (
+                <span className="px-3 py-1 bg-black/80 backdrop-blur-md border border-cyber-purple/30 rounded-xl text-[9px] font-black uppercase text-cyber-purple flex items-center gap-1.5">
+                  <Crosshair className="w-3 h-3" />
+                  YOLOv8 ACTIVE
+                </span>
+              )}
+              {isTracking && (
+                <span className="px-3 py-1 bg-black/80 backdrop-blur-md border border-cyber-green/30 rounded-xl text-[9px] font-black uppercase text-cyber-green flex items-center gap-1.5">
+                  <Signal className="w-3 h-3" />
+                  TRACKING
+                </span>
+              )}
+            </div>
+
+            {/* Webcam controls ÃÂ¢ÃÂÃÂ wrap within the card so they never
+                overflow or get clipped on narrow screens */}
+            <div className="absolute top-4 right-4 z-40 flex flex-wrap items-center justify-end gap-2 max-w-[calc(100%-2rem)] sm:max-w-none">
+              {!isWebcamActive ? (
+                <button
+                  onClick={() => startWebcam()}
+                  className="px-4 py-2 bg-cyber-blue text-black rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-all shadow-[0_0_20px_#FF6B35] touch-manipulation"
+                >
+                  <Camera className="w-4 h-4" />
+                  Start Camera
+                </button>
+              ) : (
+                <>
+                  {/* Front/Rear camera toggle ÃÂ¢ÃÂÃÂ one click, one switch. A single
+                      onClick (no extra touch handlers) so a tap never
+                      switches twice. */}
+                  <button
+                    onClick={() => {
+                      const newFacing = facingModeRef.current === 'user' ? 'environment' : 'user';
+                      startWebcam(newFacing);
+                    }}
+                    disabled={switchingCamera}
+                    aria-busy={switchingCamera}
+                    className="px-3 py-2 bg-black/60 backdrop-blur-md border border-white/15 hover:bg-black/80 disabled:opacity-60 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all touch-manipulation"
+                    title={
+                      switchingCamera
+                        ? 'Switching camera...'
+                        : facingMode === 'user'
+                        ? 'Switch to Rear Camera'
+                        : 'Switch to Front Camera'
+                    }
+                  >
+                    {switchingCamera ? (
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                      >
+                        <Camera className="w-4 h-4" />
+                      </motion.div>
+                    ) : (
+                      <Camera className="w-4 h-4" />
+                    )}
+                    {switchingCamera ? 'Switching' : facingMode === 'user' ? 'Front' : 'Rear'}
+                  </button>
+                  <button
+                    onClick={() => setDetectionActive(!detectionActive)}
+                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all touch-manipulation ${
+                      detectionActive
+                        ? 'bg-cyber-purple text-black shadow-[0_0_20px_#FF8C69]'
+                        : 'bg-black/60 backdrop-blur-md border border-white/15 text-white hover:bg-black/80'
+                    }`}
+                  >
+                    <Crosshair className="w-4 h-4" />
+                    {detectionActive ? 'Stop Detection' : 'YOLOv8 Detect'}
+                  </button>
+                  <button
+                    onClick={() => captureEvidence('manual')}
+                    className="px-4 py-2 bg-cyber-green text-black rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-all touch-manipulation"
+                  >
+                    <Camera className="w-4 h-4" />
+                    Capture
+                  </button>
+                  <button
+                    onClick={stopWebcam}
+                    className="px-4 py-2 bg-cyber-red text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-all touch-manipulation"
+                  >
+                    <CameraOff className="w-4 h-4" />
+                    Stop
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* When ESP32-CAM stream is connected, show it in the main video slot.
+                When not connected, fall back to the device (webcam) camera. */}
+            {esp32Connected ? (
+              <div className="absolute inset-0 w-full h-full bg-black flex items-center justify-center" style={{ aspectRatio: '4 / 3' }}>
+                {/* Single persistent MJPEG <img>: never use blobs/fetch loops/object URLs.
+                    Keyed only by (re)connect nonce so resize/rotation never recreates it. */}
+                <img
+                  key={esp32StreamNonce}
+                  ref={esp32ImgRef}
+                  src={esp32StreamNonce > 0 ? `${esp32StreamUrl}${esp32StreamUrl.includes('?') ? '&' : '?'}_n=${esp32StreamNonce}` : undefined}
+                  alt="ESP32-CAM live stream"
+                  className="w-full h-full object-contain object-center bg-black"
+                  style={{ maxHeight: '100dvh' }}
+                  referrerPolicy="no-referrer"
+                  onLoad={() => {
+                    esp32ReconnectAttemptRef.current = 0;
+                    esp32ReconnectInFlightRef.current = false;
+                    setEsp32StreamStatus('live');
+                    setEsp32StreamError(null);
+                    // Approximate measured frame/render events per second (best-effort; MJPEG).
+                    const now = performance.now();
+                    const samples = esp32FpsSamplesRef.current;
+                    samples.push(now);
+                    while (samples.length && now - samples[0] > 2000) samples.shift();
+                    if (samples.length >= 2) {
+                      const fps = (samples.length - 1) / ((samples[samples.length - 1] - samples[0]) / 1000);
+                      setEsp32MeasuredFps(Math.round(fps * 10) / 10);
+                    }
+                  }}
+                  onError={() => {
+                    if (!esp32Connected) return;
+                    setEsp32StreamStatus('error');
+                    scheduleEsp32Reconnect('Stream disconnected or unavailable');
+                  }}
+                />
+                {esp32StreamStatus !== 'live' && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                    <div className="text-center p-6 z-30">
+                      <Camera className="w-14 h-14 text-white/20 mx-auto mb-3" />
+                      <h3 className="text-base font-bold text-white/70 mb-1">
+                        {esp32StreamStatus === 'connecting' ? 'Connecting to ESP32-CAM…' : 'ESP32 Stream Unavailable'}
+                      </h3>
+                      <p className="text-xs text-white/40 max-w-sm mx-auto">{esp32StreamError || 'Waiting for stream…'}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* Video element â always rendered and visible in layout. A display:none
+                    video stops delivering frames, which makes camera switching
+                    report a false failure; the standby overlay below covers it
+                    instead. */}
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="absolute inset-0 w-full h-full object-contain object-center"
+                />
+                <canvas ref={canvasRef} className="hidden" />
+                <canvas
+                  ref={detectCanvasRef}
+                  className={`absolute inset-0 w-full h-full object-contain object-center pointer-events-none ${isWebcamActive ? 'block' : 'hidden'}`}
+                />
+
+                {/* Detection overlay - only when active (webcam) */}
+                {isWebcamActive && detectionActive && (
+                  <div className="absolute inset-0 pointer-events-none z-30">
+                    <motion.div
+                      initial={{ y: '-10%' }}
+                      animate={{ y: '110%' }}
+                      transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                      className="w-full h-1 bg-gradient-to-r from-transparent via-cyber-purple/50 to-transparent"
+                    />
+                    {detectedObjects.length > 0 && (
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="border-2 border-cyber-purple/60 rounded-lg p-4 bg-black/40 backdrop-blur-sm"
+                        >
+                          <div className="flex flex-wrap gap-2 justify-center">
+                            {[...new Set(lastVerdictsRef.current.map((v) => v.label))].map((label) => (
+                              <span key={label} className="px-2 py-1 bg-cyber-purple/20 border border-cyber-purple/40 rounded text-[10px] font-mono text-cyber-purple uppercase">
+                                {label}
+                              </span>
+                            ))}
+                          </div>
+                        </motion.div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Placeholder when device camera is not active */}
+                {!isWebcamActive && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black">
+                    <div className="text-center p-8 z-30">
+                      <Camera className="w-16 h-16 text-white/10 mx-auto mb-4" />
+                      <h3 className="text-lg font-bold text-white/60 mb-1">Camera Standby</h3>
+                      <p className="text-xs text-white/30 max-w-sm mx-auto">
+                        {webcamError || 'Start your camera to enable YOLOv8 object detection and vehicle tracking.'}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Bottom info bar */}
+            <div className="absolute bottom-4 left-4 right-4 z-40 flex justify-between items-end">
+              <div className="space-y-1">
+                <span className="text-[9px] font-mono uppercase tracking-widest text-white/40 block">
+                  {esp32Connected ? 'ESP32-CAM Stream' : 'Detection Engine'}
+                </span>
+                <span className="font-mono text-xs text-cyber-purple font-bold">
+                  {esp32Connected
+                    ? (esp32MeasuredFps != null ? `Stream: ~${esp32MeasuredFps} fps (measured)` : 'Stream: measuring…')
+                    : 'YOLOv8n · 640x640 · detection ~4 Hz (throttled)'}
+                </span>
+              </div>
+              {isDetecting && (
+                <div className="flex items-center gap-2 text-cyber-purple">
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  >
+                    <Crosshair className="w-4 h-4" />
+                  </motion.div>
+                  <span className="text-[10px] font-mono uppercase">Processing...</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Feature 7: Tracking Data Panel */}
+          {isTracking && (
+            <div className="glass-panel p-5 border-cyber-green/20">
+              <h3 className="text-xs font-black uppercase tracking-widest text-white mb-4 flex items-center gap-2">
+                <Signal className="w-4 h-4 text-cyber-green" /> Live Tracking Data
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-white/5 rounded-lg p-3 text-center">
+                  <p className="text-[9px] text-white/40 uppercase">WiFi Range</p>
+                  <p className="text-lg font-display font-black text-cyber-green">{wifiRange}%</p>
+                </div>
+                <div className="bg-white/5 rounded-lg p-3 text-center">
+                  <p className="text-[9px] text-white/40 uppercase">Data Points</p>
+                  <p className="text-lg font-display font-black text-cyber-blue">{trackingData.length}</p>
+                </div>
+                <div className="bg-white/5 rounded-lg p-3 text-center">
+                  <p className="text-[9px] text-white/40 uppercase">Speed</p>
+                  <p className="text-lg font-display font-black text-cyber-purple">{speedKmh.toFixed(0)} km/h</p>
+                </div>
+                <div className="bg-white/5 rounded-lg p-3 text-center">
+                  <p className="text-[9px] text-white/40 uppercase">Status</p>
+                  <p className="text-lg font-display font-black text-cyber-green">Active</p>
+                </div>
+              </div>
+              {trackingData.length > 0 && (
+                <div className="mt-3 p-3 bg-black/40 rounded-lg">
+                  <p className="text-[9px] font-mono text-white/50">
+                    Last update: {new Date(trackingData[trackingData.length - 1]?.timestamp).toLocaleTimeString()}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Captured / Violation Evidence Gallery */}
+          {evidenceViolations.length > 0 && (
+            <div className="glass-panel p-5 border-white/10">
+              <h3 className="text-xs font-black uppercase tracking-widest text-white mb-4 flex items-center gap-2">
+                <Camera className="w-4 h-4 text-cyber-green" /> Evidence ({evidenceViolations.length})
+              </h3>
+              {storageError && <p className="text-[9px] text-cyber-red mb-2">{storageError}</p>}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {evidenceViolations.map((v) => (
+                  <div key={v.id} className="relative group">
+                    <button
+                      type="button"
+                      onClick={() => setViewingEvidence(v.record)}
+                      aria-label={`View details for evidence ${v.label}`}
+                      className="block w-full touch-manipulation"
+                    >
+                      <img
+                        src={v.url}
+                        alt={`Evidence ${v.label}`}
+                        onError={(e) => {
+                          // Gracefully handle a missing / corrupted image file.
+                          const el = e.currentTarget;
+                          el.style.visibility = 'hidden';
+                          el.setAttribute('data-broken', '1');
+                        }}
+                        className="w-full h-24 object-cover rounded-xl border border-white/10"
+                      />
+                    </button>
+                    {/* verification status badge */}
+                    <span
+                      className={`absolute top-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase pointer-events-none ${
+                        v.record.verificationStatus === 'confirmed'
+                          ? 'bg-cyber-green text-black'
+                          : 'bg-cyber-orange text-black'
+                      }`}
+                    >
+                      {v.record.verificationStatus === 'confirmed' ? 'Confirmed' : 'Unverified'}
+                    </span>
+                    {/* review status badge (human workflow) */}
+                    {v.record.reviewStatus && v.record.reviewStatus !== 'pending' && (
+                      <span
+                        className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase pointer-events-none ${
+                          v.record.reviewStatus === 'approved'
+                            ? 'bg-cyber-blue text-black'
+                            : 'bg-cyber-red text-white'
+                        }`}
+                      >
+                        {v.record.reviewStatus === 'approved' ? 'Reviewed' : 'Rejected'}
+                      </span>
+                    )}
+                    {/* actions ÃÂ¢ÃÂÃÂ always visible so they work on touch */}
+                    <div className="absolute top-1 right-1 flex gap-1">
+                      <button onClick={() => setViewingEvidence(v.record)} aria-label="View evidence details" title="View details"
+                        className="p-1 bg-black/70 text-white rounded-lg hover:bg-black/90 touch-manipulation">
+                        <Eye className="w-3 h-3" />
+                      </button>
+                      <button onClick={() => downloadEvidence(v)} aria-label="Download evidence" title="Download"
+                        className="p-1 bg-black/70 text-white rounded-lg hover:bg-black/90 touch-manipulation">
+                        <Download className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => openEditEvidence(v.record)}
+                        aria-label="Edit evidence" title="Edit"
+                        className="p-1 bg-black/70 text-white rounded-lg hover:bg-black/90 touch-manipulation"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                      <button onClick={() => setConfirmDeleteId(v.id)} aria-label="Delete evidence" title="Delete"
+                        className="p-1 bg-cyber-red/80 text-white rounded-lg hover:bg-cyber-red touch-manipulation">
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <p className="text-[9px] font-mono text-white/60 mt-1 truncate">{v.label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Delete confirmation modal */}
+          {confirmDeleteId && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+              <div className="w-full max-w-sm p-5 bg-[#14100D] border border-white/10 rounded-2xl">
+                <h3 className="text-sm font-black text-white mb-2">Delete evidence?</h3>
+                <p className="text-xs text-white/50 mb-5">This permanently deletes the captured image and its metadata. This cannot be undone.</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setConfirmDeleteId(null)}
+                    className="flex-1 py-2.5 bg-white/5 border border-white/10 text-white/70 rounded-xl text-xs font-bold touch-manipulation">Cancel</button>
+                  <button onClick={() => confirmDeleteEvidence(confirmDeleteId)}
+                    className="flex-1 py-2.5 bg-cyber-red text-white rounded-xl text-xs font-black touch-manipulation">Delete</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* View evidence details (read-only) */}
+          {viewingEvidence && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+              <div className="w-full max-w-md max-h-[90vh] overflow-y-auto p-5 bg-[#14100D] border border-white/10 rounded-2xl">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-black text-white">Evidence details</h3>
+                  <button type="button" onClick={() => setViewingEvidence(null)} aria-label="Close details"
+                    className="p-1 text-white/40 hover:text-white touch-manipulation">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {evidenceUrlFor(viewingEvidence.id) ? (
+                  <img
+                    src={evidenceUrlFor(viewingEvidence.id)}
+                    alt={`Evidence ${viewingEvidence.type}`}
+                    onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
+                    className="w-full max-h-[40vh] object-contain rounded-xl border border-white/10 mb-4 bg-black"
+                  />
+                ) : (
+                  <div className="w-full py-8 mb-4 px-3 text-center text-[10px] text-white/40 bg-black/40 rounded-xl border border-white/10">
+                    Image file is missing or could not be read. The metadata below is still available.
+                  </div>
+                )}
+
+                <div className="space-y-2 text-[11px]">
+                  {[
+                    ['Type', viewingEvidence.type],
+                    ['Verification', viewingEvidence.verificationStatus || 'unverified'],
+                    ['Review', viewingEvidence.reviewStatus || 'pending'],
+                    ['Captured', new Date(viewingEvidence.createdAt).toLocaleString()],
+                    ['Speed', viewingEvidence.speed != null ? `${viewingEvidence.speed} km/h` : 'Not recorded'],
+                    ['Confidence', viewingEvidence.confidence != null ? `${viewingEvidence.confidence}%` : 'Not recorded'],
+                    ['Vehicle class', viewingEvidence.vehicleClass || 'Not recorded'],
+                    ['Detected objects', viewingEvidence.objects || 'None'],
+                    ['GPS', viewingEvidence.lat != null && viewingEvidence.lng != null
+                      ? `${viewingEvidence.lat.toFixed(5)}, ${viewingEvidence.lng.toFixed(5)}`
+                      : 'No GPS fix'],
+                  ].map(([k, val]) => (
+                    <div key={k as string} className="flex items-start justify-between gap-3 bg-white/5 rounded-lg px-3 py-2">
+                      <span className="text-white/40 font-black uppercase text-[9px] tracking-widest shrink-0">{k}</span>
+                      <span className="text-white/80 text-right break-all">{val}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {viewingEvidence.reasons && viewingEvidence.reasons.length > 0 && (
+                  <div className="mt-3 bg-white/5 rounded-lg px-3 py-2">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-1">Verification reasons</p>
+                    <ul className="text-[10px] text-white/60 space-y-0.5 list-disc list-inside">
+                      {viewingEvidence.reasons.map((r, i) => (<li key={i}>{r}</li>))}
+                    </ul>
+                  </div>
+                )}
+
+                {viewingEvidence.reviewNote && (
+                  <div className="mt-2 bg-white/5 rounded-lg px-3 py-2">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-1">Review note</p>
+                    <p className="text-[10px] text-white/70">{viewingEvidence.reviewNote}</p>
+                  </div>
+                )}
+
+                <div className="flex gap-2 mt-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const item = evidenceViolations.find((x) => x.id === viewingEvidence.id);
+                      if (item) downloadEvidence(item);
+                    }}
+                    className="flex-1 py-2.5 bg-cyber-green text-black rounded-xl text-xs font-black touch-manipulation"
+                  >
+                    Download
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { openEditEvidence(viewingEvidence); setViewingEvidence(null); }}
+                    className="flex-1 py-2.5 bg-cyber-blue text-black rounded-xl text-xs font-black touch-manipulation"
+                  >
+                    Edit
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Edit evidence metadata modal (image is never modified) */}
+          {editingEvidence && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+              <div className="w-full max-w-sm max-h-[90vh] overflow-y-auto p-5 bg-[#14100D] border border-white/10 rounded-2xl">
+                <h3 className="text-sm font-black text-white mb-4">Edit evidence</h3>
+                <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">Type</label>
+                <input
+                  type="text"
+                  value={editingEvidence.type}
+                  onChange={(e) => setEditingEvidence({ ...editingEvidence, type: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white mb-3 focus:outline-none focus:border-cyber-blue"
+                />
+                <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">
+                  Speed (km/h) ÃÂ¢ÃÂÃÂ blank keeps captured value
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  value={editingEvidence.speed}
+                  onChange={(e) => setEditingEvidence({ ...editingEvidence, speed: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white mb-3 focus:outline-none focus:border-cyber-blue"
+                />
+                <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">Detected objects</label>
+                <input
+                  type="text"
+                  value={editingEvidence.objects}
+                  onChange={(e) => setEditingEvidence({ ...editingEvidence, objects: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white mb-3 focus:outline-none focus:border-cyber-blue"
+                />
+                <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">Verification status</label>
+                <div className="flex gap-2 mb-3">
+                  {(['confirmed', 'unverified'] as const).map((s) => (
+                    <button key={s} type="button"
+                      onClick={() => setEditingEvidence({ ...editingEvidence, verificationStatus: s })}
+                      className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase touch-manipulation ${
+                        editingEvidence.verificationStatus === s
+                          ? s === 'confirmed' ? 'bg-cyber-green text-black' : 'bg-cyber-orange text-black'
+                          : 'bg-white/5 text-white/50 border border-white/10'
+                      }`}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">Review status</label>
+                <div className="flex gap-2 mb-3">
+                  {(['pending', 'approved', 'rejected'] as const).map((s) => (
+                    <button key={s} type="button"
+                      onClick={() => setEditingEvidence({ ...editingEvidence, reviewStatus: s })}
+                      className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase touch-manipulation ${
+                        editingEvidence.reviewStatus === s
+                          ? s === 'approved' ? 'bg-cyber-blue text-black'
+                            : s === 'rejected' ? 'bg-cyber-red text-white'
+                            : 'bg-white/20 text-white'
+                          : 'bg-white/5 text-white/50 border border-white/10'
+                      }`}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <label className="text-[9px] font-black uppercase tracking-widest text-white/40 block mb-1">Review note</label>
+                <textarea
+                  rows={2}
+                  value={editingEvidence.reviewNote}
+                  onChange={(e) => setEditingEvidence({ ...editingEvidence, reviewNote: e.target.value })}
+                  placeholder="Optional note for the audit trail"
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white mb-3 focus:outline-none focus:border-cyber-blue resize-y"
+                />
+                <p className="text-[9px] text-white/30 mb-4">The original captured image is always preserved.</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setEditingEvidence(null)}
+                    className="flex-1 py-2.5 bg-white/5 border border-white/10 text-white/70 rounded-xl text-xs font-bold touch-manipulation">Cancel</button>
+                  <button onClick={saveEvidenceEdit}
+                    className="flex-1 py-2.5 bg-cyber-blue text-black rounded-xl text-xs font-black touch-manipulation">Save</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Detection Results Panel */}
+          <div className="glass-panel p-5 border-white/10">
+            <h3 className="text-xs font-black uppercase tracking-widest text-white mb-4 flex items-center gap-2">
+              <Crosshair className="w-4 h-4 text-cyber-purple" /> YOLOv8 Detection Results
+            </h3>
+            {detectedObjects.length > 0 ? (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {lastVerdictsRef.current.map((v, i) => (
+                    <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
+                      <p className="text-sm font-bold text-white">{v.label}</p>
+                      <p className="text-[9px] font-mono text-cyber-purple mt-1">Confidence: {Math.round(v.confidence * 100)}%</p>
+                      <span
+                        className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${
+                          v.verified ? 'bg-cyber-green/20 text-cyber-green' : 'bg-cyber-orange/20 text-cyber-orange'
+                        }`}
+                      >
+                        {v.verified ? 'Verified' : 'Heuristic'}
+                      </span>
+                      <p className="text-[8px] font-mono text-white/30 mt-1 leading-tight">{v.basis}</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[9px] font-mono text-white/30 mt-3 leading-relaxed">
+                  {dedicatedModelActive
+                    ? 'Trained Indian-vehicle classifier active ÃÂ¢ÃÂÃÂ verified subclasses.'
+                    : VEHICLE_SUBTYPE_LIMITATION}
+                </p>
+              </>
+            ) : (
+              <div className="text-center py-8 text-white/20 text-xs">
+                <Crosshair className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                Start camera and enable detection to see results
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: Quick Actions & Status */}
+        <div className="space-y-4">
+          {/* Emergency Contacts: emergency services + personal contacts in one
+                unified panel, matching the dark AEGIS card language. */}
+          <div className="glass-panel p-5 border-white/10 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-black uppercase tracking-widest text-white flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-cyber-red" /> Emergency Contacts
+              </h3>
+              <button
+                onClick={() => setIsAddContactOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-wider text-white/60 hover:text-white transition-all touch-manipulation"
+                title="Add Emergency Contact"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add
+              </button>
+            </div>
+
+            {/* Emergency services - prominent, distinct colours, real tel: actions */}
+            <div className="space-y-2">
+              <p className="text-[9px] font-black uppercase tracking-widest text-white/30">Emergency Services</p>
+              <div className="space-y-2">
+                <a
+                  href="tel:100"
+                  className="w-full py-3.5 bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-blue-500/30 active:scale-[0.99] transition-all touch-manipulation"
+                >
+                  <AlertOctagon className="w-4 h-4" /> Police <span className="font-mono">100</span>
+                </a>
+                <a
+                  href="tel:102"
+                  className="w-full py-3.5 bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-red-500/30 active:scale-[0.99] transition-all touch-manipulation"
+                >
+                  <Heart className="w-4 h-4" /> Ambulance <span className="font-mono">102</span>
+                </a>
+                <a
+                  href="tel:112"
+                  className="w-full py-3.5 bg-white/5 border border-white/10 text-white/70 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-white/10 active:scale-[0.99] transition-all touch-manipulation"
+                >
+                  <Phone className="w-4 h-4" /> Emergency <span className="font-mono">112</span>
+                </a>
+              </div>
+            </div>
+
+            {/* Saved personal contacts - clean, consistent rows */}
+            {savedContacts.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-[9px] font-black uppercase tracking-widest text-white/30">Saved Contacts</p>
+                <div className="space-y-2">
+                  {savedContacts.map((contact) => (
+                    <div
+                      key={contact.id}
+                      className="flex items-center justify-between gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-full bg-cyber-blue/15 border border-cyber-blue/20 flex items-center justify-center shrink-0">
+                          <User className="w-3.5 h-3.5 text-cyber-blue" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-white truncate">{contact.name}</p>
+                          <p className="text-[10px] font-mono text-white/40">{contact.phone}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <a
+                          href={`tel:${contact.phone}`}
+                          aria-label={`Call ${contact.name}`}
+                          className="p-2 bg-cyber-blue/10 text-cyber-blue rounded-lg hover:bg-cyber-blue/20 transition-colors touch-manipulation"
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                        </a>
+                        <button
+                          onClick={() => removeContact(contact.id)}
+                          aria-label={`Delete ${contact.name}`}
+                          className="p-2 bg-white/5 text-white/30 rounded-lg hover:text-cyber-red hover:bg-cyber-red/10 transition-colors touch-manipulation"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* System Status */}
+          <div className="glass-panel p-5 border-white/10 space-y-3">
+            <h3 className="text-xs font-black uppercase tracking-widest text-white flex items-center gap-2">
+              <Activity className="w-4 h-4 text-cyber-green" /> System Status
+            </h3>
+            <div className="space-y-2">
+              {[
+                { label: 'YOLOv8 Engine', status: 'Ready', color: 'text-cyber-green' },
+                { label: 'Camera Module', status: isWebcamActive ? 'Active' : 'Standby', color: isWebcamActive ? 'text-cyber-green' : 'text-white/40' },
+                { label: 'GPS Module', status: gpsStatus === 'locked' ? 'Locked' : 'Searching', color: gpsStatus === 'locked' ? 'text-cyber-green' : 'text-cyber-orange' },
+                { label: 'ESP32-CAM', status: esp32Connected ? 'Connected' : 'Disconnected', color: esp32Connected ? 'text-cyber-green' : 'text-white/40' },
+                { label: 'Tracking', status: isTracking ? 'Active' : 'Off', color: isTracking ? 'text-cyber-green' : 'text-white/40' },
+                { label: 'Internet', status: 'Connected', color: 'text-cyber-green' },
+              ].map((item, i) => (
+                <div key={i} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
+                  <span className="text-[10px] font-bold text-white/60">{item.label}</span>
+                  <span className={`text-[10px] font-mono font-bold ${item.color}`}>{item.status}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* (Saved Contacts are shown inside the unified Emergency Contacts
+                panel above - this separate card was removed to avoid duplication
+                and to keep one consistent card style.) */}
+        </div>
+      </div>
+
+      {/* Add Contact Modal */}
+      <Dialog.Root open={isAddContactOpen} onOpenChange={setIsAddContactOpen}>
+        <AnimatePresence>
+          {isAddContactOpen && (
+            <Dialog.Portal forceMount>
+              <Dialog.Overlay asChild>
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200]"
+                />
+              </Dialog.Overlay>
+              <Dialog.Content asChild>
+                <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md p-4 z-[201]">
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    className="bg-[#121216] border border-white/10 rounded-3xl p-7 shadow-2xl"
+                  >
+                    <h2 className="text-xl font-display font-black text-white mb-6">Add Emergency Contact</h2>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-[10px] font-mono uppercase tracking-widest text-white/50 block mb-1">Name</label>
+                        <input
+                          type="text"
+                          placeholder="Contact name"
+                          value={newContactName}
+                          onChange={(e) => setNewContactName(e.target.value)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyber-blue"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-mono uppercase tracking-widest text-white/50 block mb-1">Phone Number</label>
+                        <input
+                          type="tel"
+                          placeholder="Phone number"
+                          value={newContactPhone}
+                          onChange={(e) => setNewContactPhone(e.target.value)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyber-blue"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-3 mt-6">
+                      <button
+                        onClick={() => setIsAddContactOpen(false)}
+                        className="flex-1 py-3 bg-white/5 border border-white/10 text-white/60 rounded-xl text-sm font-bold hover:bg-white/10 transition-all"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={addContact}
+                        className="flex-1 py-3 bg-cyber-blue text-black rounded-xl text-sm font-black hover:scale-[1.02] transition-all"
+                      >
+                        Add Contact
+                      </button>
+                    </div>
+                  </motion.div>
+                </div>
+              </Dialog.Content>
+            </Dialog.Portal>
+          )}
+        </AnimatePresence>
+      </Dialog.Root>
+
+      {/* Verification result toast */}
+      {captureResult && (
+        <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-[210] max-w-[92vw] px-4 py-3 rounded-2xl border shadow-2xl ${
+          captureResult.status === 'confirmed'
+            ? 'bg-cyber-green/95 border-cyber-green text-black'
+            : captureResult.status === 'unverified'
+            ? 'bg-cyber-orange/95 border-cyber-orange text-black'
+            : 'bg-cyber-red/95 border-cyber-red text-white'
+        }`}>
+          <div className="flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-black uppercase tracking-wider">
+                {captureResult.status === 'confirmed'
+                  ? `Confirmed: ${captureResult.violationType || 'Violation'}`
+                  : captureResult.status === 'unverified'
+                  ? `Candidate ÃÂ¢ÃÂÃÂ requires review${captureResult.violationType ? ` (${captureResult.violationType})` : ''}`
+                  : 'Capture rejected'}
+              </p>
+              <ul className="text-[10px] font-mono mt-1 space-y-0.5 list-disc list-inside">
+                {captureResult.reasons.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </div>
+            <button onClick={() => setCaptureResult(null)} aria-label="Dismiss"
+              className="shrink-0 p-1 text-current opacity-70 hover:opacity-100 touch-manipulation">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Portal-based dropdowns - rendered to document.body to escape all clipping contexts */}
+    </div>
+  );
+}
